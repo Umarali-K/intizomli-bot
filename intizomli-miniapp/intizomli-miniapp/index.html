@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Intizomli Erkak — Mini App</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #0a1526;
+      --card: #11213a;
+      --line: rgba(255, 255, 255, 0.12);
+      --txt: #edf3ff;
+      --muted: #9db0cf;
+      --ok: #1fc77e;
+      --warn: #f2ad22;
+      --danger: #e15858;
+      --brand: #2a63ff;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background: radial-gradient(circle at top, #132749, var(--bg)); color: var(--txt); }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+    .title { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 10px; }
+    .row { display:flex; flex-wrap:wrap; gap:8px; }
+    .badge { border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
+    .pill { padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; min-width: 110px; }
+    .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }
+    .input, .textarea { width:100%; background:#0d1b31; color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:10px; }
+    .textarea { min-height:78px; resize:vertical; }
+    .btn { background:#22395f; border:1px solid var(--line); color:var(--txt); border-radius:10px; padding:10px 12px; cursor:pointer; }
+    .btn.primary { background:var(--brand); border-color:var(--brand); }
+    .btn.ok { background:var(--ok); border-color:var(--ok); color:#062415; }
+    .btn.warn { background:var(--warn); border-color:var(--warn); color:#271a03; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .list { display:flex; flex-direction:column; gap:8px; }
+    label.item { display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:10px; padding:8px; }
+    .progress { height:10px; background:#0c1930; border:1px solid var(--line); border-radius:999px; overflow:hidden; }
+    .progress > div { height:100%; background:linear-gradient(90deg, #3ba5ff, #42da94); width:0%; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { border-bottom:1px solid var(--line); padding:6px; text-align:left; font-size:12px; }
+    .hidden { display:none; }
+    @media (max-width: 760px){ .grid{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 class="title">🔥 Intizomli Erkak</h1>
+      <p class="sub">Ro'yxatdan o'tish → Modul sozlash → To'lov → 25 kunlik marafon</p>
+      <div class="row" id="stateBadges"></div>
+      <p id="statusMsg" class="muted"></p>
+    </div>
+
+    <div id="regCard" class="card hidden">
+      <h3>1) Ro'yxatdan o'tish</h3>
+      <div class="grid">
+        <input class="input" id="fullName" placeholder="Ism familiya" />
+        <input class="input" id="age" type="number" placeholder="Yosh" />
+        <input class="input" id="location" placeholder="Qayerdanligi" />
+        <textarea class="textarea" id="goal" placeholder="Marafonga qatnashish maqsadi"></textarea>
+        <textarea class="textarea" id="pains" placeholder="Og'riqlar va muammolar"></textarea>
+        <textarea class="textarea" id="expectations" placeholder="Marafondan kutilmalar"></textarea>
+      </div>
+      <div style="margin-top:10px"><button class="btn primary" id="saveReg">Saqlash</button></div>
+    </div>
+
+    <div id="setupCard" class="card hidden">
+      <h3>2) Modullarni sozlash</h3>
+      <p class="muted">Tanlangan modullarga qarab kuniga 3 mahal eslatma yuboriladi.</p>
+      <div class="list" id="moduleList"></div>
+      <div class="grid" style="margin-top:10px">
+        <textarea class="textarea" id="habitsInput" placeholder="Odatlar (3-6 ta), vergul bilan"></textarea>
+        <textarea class="textarea" id="sportsInput" placeholder="Sport (1-3 ta), vergul bilan"></textarea>
+        <input class="input" id="bookInput" placeholder="Mutolaa kitobi" />
+        <input class="input" id="readingTaskInput" placeholder="Mutolaa vazifasi (masalan 30-50 bet)" />
+        <input class="input" id="remindersInput" placeholder="Eslatma soatlari (masalan 9,14,21)" />
+      </div>
+      <p class="muted" id="templateHints"></p>
+      <button class="btn primary" id="saveSetup">Sozlamalarni saqlash</button>
+    </div>
+
+    <div id="paymentCard" class="card hidden">
+      <h3>3) To'lov</h3>
+      <p class="muted">To'lov: <b>89 000 so'm</b>. Adminga to'lov qilasiz, admin sizga maxsus kod beradi.</p>
+      <div class="row">
+        <button class="btn warn" id="requestPayment">Adminga o'tish</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <input class="input" id="activationCode" placeholder="Maxsus kodni kiriting" />
+        <button class="btn primary" id="verifyCode">Kodni tasdiqlash</button>
+      </div>
+      <p class="muted" id="paymentMsg"></p>
+    </div>
+
+    <div id="dailyCard" class="card hidden">
+      <h3>📅 Kunlik Hisobot</h3>
+      <p class="muted" id="dayText"></p>
+      <div id="dailyPlan" class="list"></div>
+      <div style="margin-top:10px"><button class="btn ok" id="sendDaily">Hisobot yuborish</button></div>
+      <p class="muted" id="dailyMsg"></p>
+    </div>
+
+    <div id="challengeCard" class="card hidden">
+      <h3>🎲 Qiyinchilik (5-kundan ochiladi)</h3>
+      <div class="row">
+        <input class="input" id="challengeNums" placeholder="3 ta raqam: masalan 3, 12, 25" />
+        <button class="btn primary" id="pickChallenge">Tanlash</button>
+      </div>
+      <p class="muted" id="challengeMsg"></p>
+    </div>
+
+    <div id="progressCard" class="card hidden">
+      <h3>📊 Intizom Doskasi</h3>
+      <div id="moduleProgress" class="list"></div>
+      <div style="height:8px"></div>
+      <table>
+        <thead><tr><th>Sana</th><th>Modul</th><th>Bajarildi</th><th>Foiz</th></tr></thead>
+        <tbody id="progressTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+const API = new URLSearchParams(window.location.search).get("api") || "https://intizomli-api.onrender.com";
+const tgUser = tg?.initDataUnsafe?.user;
+const TG_ID = tgUser?.id;
+let STATE = null;
+let TEMPLATES = null;
+let PAYMENT_META = null;
+
+if (tg) { tg.ready(); tg.expand(); }
+
+const qs = (id) => document.getElementById(id);
+
+async function api(path, options = {}) {
+  const res = await fetch(API + path, {
+    headers: {"Content-Type":"application/json"},
+    ...options,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || (`HTTP ${res.status}`));
+  }
+  return res.json();
+}
+
+function parseCsv(v){ return v.split(",").map(x => x.trim()).filter(Boolean); }
+
+function show(id, yes){ qs(id).classList.toggle("hidden", !yes); }
+
+function renderState() {
+  const badges = [];
+  badges.push(`ID: ${TG_ID || "-"}`);
+  badges.push(`To'lov: ${STATE.payment_status}`);
+  badges.push(`Kun: ${STATE.marathon_day}/${STATE.marathon_days}`);
+  badges.push(`Reyting: ${STATE.rating_points || 0}`);
+  qs("stateBadges").innerHTML = badges.map(x => `<div class="badge">${x}</div>`).join("");
+
+  show("regCard", !STATE.registration_completed);
+  show("setupCard", STATE.registration_completed && !STATE.setup_completed);
+  show("paymentCard", STATE.registration_completed && STATE.setup_completed && STATE.payment_status !== "paid");
+  show("dailyCard", STATE.is_active);
+  show("progressCard", STATE.is_active);
+
+  const challengeAllowed = STATE.is_active && STATE.modules?.includes("challenge") && STATE.marathon_day >= 5;
+  show("challengeCard", challengeAllowed);
+
+  qs("statusMsg").textContent = STATE.is_active
+    ? "Marafon aktiv. Har kuni checkbox hisobot yuboring."
+    : "Marafon aktiv emas. Bosqichlarni ketma-ket yakunlang.";
+}
+
+function renderSetupTemplates(){
+  if (!TEMPLATES) return;
+  qs("moduleList").innerHTML = TEMPLATES.modules.map(m => `<label class="item"><input type="checkbox" value="${m}" /> ${m}</label>`).join("");
+  qs("templateHints").textContent = `Odatlar shabloni: ${TEMPLATES.habits.join(", ")} | Sport shabloni: ${TEMPLATES.sports.join(", ")}`;
+  qs("habitsInput").value = TEMPLATES.habits.slice(0,3).join(", ");
+  qs("sportsInput").value = TEMPLATES.sports.slice(0,2).join(", ");
+  qs("remindersInput").value = "9,14,21";
+}
+
+function checkedModules(){
+  return [...qs("moduleList").querySelectorAll("input[type='checkbox']")].filter(x=>x.checked).map(x=>x.value);
+}
+
+async function loadDaily(){
+  const d = await api(`/v1/app/daily/${TG_ID}`);
+  qs("dayText").textContent = `${d.report_date} | ${d.day}-kun`;
+
+  const blocks = [];
+  Object.entries(d.plan || {}).forEach(([module, items]) => {
+    blocks.push(`<div class="pill"><b>${module.toUpperCase()}</b></div>`);
+    items.forEach(item => {
+      const key = `${module}:${item}`;
+      const checked = d.checked?.[key] ? "checked" : "";
+      blocks.push(`<label class="item"><input type="checkbox" data-module="${module}" data-item="${item}" ${checked}/> ${item}</label>`);
+    });
+  });
+  qs("dailyPlan").innerHTML = blocks.join("") || "Bugungi plan yo'q";
+}
+
+async function loadProgress(){
+  const p = await api(`/v1/app/progress/${TG_ID}`);
+  const mp = p.module_percent || {};
+  qs("moduleProgress").innerHTML = Object.keys(mp).map(m => `
+    <div>
+      <div class="row" style="justify-content:space-between"><span>${m}</span><span>${mp[m]}%</span></div>
+      <div class="progress"><div style="width:${mp[m]}%"></div></div>
+    </div>`).join("") || "Hali progress yo'q";
+
+  qs("progressTable").innerHTML = (p.table || []).map(r => `<tr><td>${r.date}</td><td>${r.module}</td><td>${r.done}/${r.total}</td><td>${r.percent}%</td></tr>`).join("");
+}
+
+async function bootstrap(){
+  if (!TG_ID) {
+    qs("statusMsg").textContent = `Telegram ichida oching. API: ${API}`;
+    return;
+  }
+  const b = await api("/v1/app/bootstrap", {
+    method: "POST",
+    body: JSON.stringify({
+      tg_user_id: TG_ID,
+      username: tgUser?.username || null,
+      first_name: tgUser?.first_name || null
+    })
+  });
+  TEMPLATES = b.templates;
+  PAYMENT_META = b.payment || {};
+
+  STATE = await api(`/v1/app/state/${TG_ID}`);
+  renderSetupTemplates();
+  renderState();
+
+  if (STATE.is_active) {
+    await loadDaily();
+    await loadProgress();
+  }
+}
+
+function showError(prefix, error){
+  const msg = (error && error.message) ? error.message : String(error || "Noma'lum xato");
+  qs("statusMsg").textContent = `${prefix}: ${msg}`;
+  console.error(prefix, error);
+}
+
+qs("saveReg").addEventListener("click", async () => {
+  try {
+    await api("/v1/app/register", {
+      method: "POST",
+      body: JSON.stringify({
+        tg_user_id: TG_ID,
+        full_name: qs("fullName").value,
+        age: Number(qs("age").value),
+        location: qs("location").value,
+        goal: qs("goal").value,
+        pains: qs("pains").value,
+        expectations: qs("expectations").value,
+      })
+    });
+    await bootstrap();
+  } catch (e) { showError("Ro'yxatdan o'tishda xato", e); }
+});
+
+qs("saveSetup").addEventListener("click", async () => {
+  try {
+    await api("/v1/app/setup", {
+      method: "POST",
+      body: JSON.stringify({
+        tg_user_id: TG_ID,
+        modules: checkedModules(),
+        habits: parseCsv(qs("habitsInput").value),
+        sports: parseCsv(qs("sportsInput").value),
+        reading_book: qs("bookInput").value,
+        reading_task: qs("readingTaskInput").value,
+        reminder_hours: parseCsv(qs("remindersInput").value).map(Number),
+      })
+    });
+    await bootstrap();
+  } catch (e) { showError("Modul sozlashda xato", e); }
+});
+
+qs("requestPayment").addEventListener("click", async () => {
+  try {
+    const r = await api("/v1/app/payment/request", { method:"POST", body: JSON.stringify({tg_user_id: TG_ID}) });
+    qs("paymentMsg").textContent = r.note || "To'lov kutilmoqda.";
+    const adminUrl = r.admin_url || PAYMENT_META?.admin_url;
+    if (adminUrl) {
+      if (tg && tg.openTelegramLink) tg.openTelegramLink(adminUrl);
+      else if (tg && tg.openLink) tg.openLink(adminUrl);
+      else window.open(adminUrl, "_blank");
+    }
+    await bootstrap();
+  } catch (e) { showError("To'lov so'rovida xato", e); }
+});
+
+qs("verifyCode").addEventListener("click", async () => {
+  const code = qs("activationCode").value.trim();
+  if (!code) {
+    qs("paymentMsg").textContent = "Kod kiriting.";
+    return;
+  }
+  try {
+    const r = await api("/v1/app/payment/verify-code", {
+      method: "POST",
+      body: JSON.stringify({ tg_user_id: TG_ID, code })
+    });
+    qs("paymentMsg").textContent = r.marathon_started ? "✅ Marafon ochildi." : "Kod tasdiqlandi.";
+    await bootstrap();
+  } catch (e) {
+    showError("Kod tasdiqlashda xato", e);
+  }
+});
+
+qs("sendDaily").addEventListener("click", async () => {
+  const checked = {};
+  [...qs("dailyPlan").querySelectorAll("input[type='checkbox']")].forEach(ch => {
+    if (!ch.checked) return;
+    const m = ch.dataset.module;
+    if (!checked[m]) checked[m] = [];
+    checked[m].push(ch.dataset.item);
+  });
+  try {
+    const r = await api("/v1/app/daily/report", { method:"POST", body: JSON.stringify({tg_user_id: TG_ID, checked}) });
+    qs("dailyMsg").textContent = `Hisobot saqlandi: ${r.percent}%`;
+    if (tg) tg.sendData(JSON.stringify({ type: "daily_report_submitted", percent: r.percent }));
+    await loadProgress();
+  } catch (e) { showError("Hisobot yuborishda xato", e); }
+});
+
+qs("pickChallenge").addEventListener("click", async () => {
+  const nums = parseCsv(qs("challengeNums").value).map(Number);
+  try {
+    const r = await api("/v1/app/challenge/pick", { method:"POST", body: JSON.stringify({tg_user_id: TG_ID, numbers: nums}) });
+    qs("challengeMsg").textContent = `Vazifalar: ${r.tasks.join(" | ")} | Muddat: ${r.deadline}`;
+    await loadDaily();
+  } catch (e) { showError("Challenge tanlashda xato", e); }
+});
+
+window.addEventListener("error", (event) => {
+  showError("Frontend xatosi", event.error || event.message);
+});
+
+bootstrap().catch((e) => showError("Yuklashda xato", e));
+</script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+services:
+  - type: worker
+    name: intizomli-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: MINIAPP_URL
+        value: https://intizomli-miniapp.vercel.app
+      - key: API_PUBLIC_URL
+        value: https://intizomli-api.onrender.com
+      - key: DATABASE_URL
+        sync: false
+      - key: DAILY_REPORT_HOUR
+        value: "21"
+      - key: BOT_TIMEZONE
+        value: Asia/Tashkent
+      - key: REMINDER_HOURS
+        value: "9,14,21"
+      - key: ADMIN_CONFIRM_TOKEN
+        sync: false
+      - key: PAYMENT_MODE
+        value: manual_code
+      - key: ADMIN_CONTACT_USERNAME
+        sync: false
+      - key: ADMIN_TG_IDS
+        sync: false
+      - key: CLICK_CHECKOUT_BASE_URL
+        sync: false
+      - key: CLICK_SERVICE_ID
+        sync: false
+      - key: CLICK_MERCHANT_ID
+        sync: false
+      - key: CLICK_SECRET_TOKEN
+        sync: false
+      - key: CLICK_SECRET_KEY
+        sync: false
+      - key: PAYME_MERCHANT_ID
+        sync: false
+      - key: PAYME_KEY
+        sync: false
+      - key: PAYME_CHECKOUT_BASE_URL
+        value: https://checkout.paycom.uz
+
+  - type: web
+    name: intizomli-api
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api_main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTO_CREATE_SCHEMA
+        value: "0"
+      - key: CORS_ORIGINS
+        value: https://intizomli-miniapp.vercel.app
+      - key: ADMIN_CONFIRM_TOKEN
+        sync: false
+      - key: PAYMENT_MODE
+        value: manual_code
+      - key: ADMIN_CONTACT_USERNAME
+        sync: false
+      - key: CLICK_CHECKOUT_BASE_URL
+        sync: false
+      - key: CLICK_SERVICE_ID
+        sync: false
+      - key: CLICK_MERCHANT_ID
+        sync: false
+      - key: CLICK_SECRET_TOKEN
+        sync: false
+      - key: CLICK_SECRET_KEY
+        sync: false
+      - key: PAYME_MERCHANT_ID
+        sync: false
+      - key: PAYME_KEY
+        sync: false
+      - key: PAYME_CHECKOUT_BASE_URL
+        value: https://checkout.paycom.uz
