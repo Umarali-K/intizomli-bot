@@ -1,15 +1,16 @@
 import secrets
 import string
-from datetime import date, datetime
+import json
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy import Integer, func, select
+from sqlalchemy import Integer, and_, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.config import settings
-from app.models import ActivationCode, DailyModuleReport, PaymentTransaction, User
+from app.models import ActivationCode, AuditLog, DailyModuleReport, PaymentTransaction, User
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
@@ -164,10 +165,19 @@ def admin_codes_bulk(
                 code=code,
                 target_tg_user_id=target,
                 is_used=False,
+                expires_at=datetime.utcnow() + timedelta(hours=settings.ACTIVATION_CODE_TTL_HOURS),
             )
         )
         created.append(code)
 
+    db.add(
+        AuditLog(
+            actor_tg_user_id=None,
+            action="admin_bulk_codes",
+            target_tg_user_id=target,
+            payload_json=f'{{"count": {len(created)}}}',
+        )
+    )
     db.commit()
     return {
         "ok": True,
@@ -236,7 +246,10 @@ def admin_reports_missed(
 ) -> Dict[str, Any]:
     target_date = date.today()
     if report_date:
-        target_date = datetime.strptime(report_date, "%Y-%m-%d").date()
+        try:
+            target_date = datetime.strptime(report_date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="report_date format: YYYY-MM-DD") from exc
 
     paid_users = list(db.scalars(select(User).where(User.payment_status == "paid")))
     submitted_ids = set(
@@ -302,3 +315,70 @@ def admin_backup_export(_: None = Depends(_require_admin), db: Session = Depends
             for c in codes
         ],
     }
+
+
+@router.post("/users/{tg_user_id}/kick")
+def admin_user_kick(
+    tg_user_id: int,
+    _: None = Depends(_require_admin),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    user = db.scalar(select(User).where(User.tg_user_id == tg_user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+    before = {
+        "status": user.status,
+        "is_paid": user.is_paid,
+        "payment_status": user.payment_status,
+        "onboarding_completed": user.onboarding_completed,
+    }
+    user.status = "kicked"
+    user.is_paid = False
+    user.payment_status = "kicked"
+    user.onboarding_completed = False
+    db.add(user)
+    db.add(
+        AuditLog(
+            actor_tg_user_id=None,
+            action="kick_user",
+            target_tg_user_id=tg_user_id,
+            payload_json=json.dumps({"before": before, "source": "admin_api"}, ensure_ascii=False),
+        )
+    )
+    db.commit()
+    return {"ok": True, "tg_user_id": tg_user_id, "status": "kicked"}
+
+
+@router.post("/users/{tg_user_id}/rollback")
+def admin_user_rollback(
+    tg_user_id: int,
+    _: None = Depends(_require_admin),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    user = db.scalar(select(User).where(User.tg_user_id == tg_user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+    log = db.scalar(
+        select(AuditLog)
+        .where(and_(AuditLog.action == "kick_user", AuditLog.target_tg_user_id == tg_user_id))
+        .order_by(AuditLog.created_at.desc())
+    )
+    if not log or not log.payload_json:
+        raise HTTPException(status_code=404, detail="rollback source not found")
+    payload = json.loads(log.payload_json)
+    before = payload.get("before", {})
+    user.status = before.get("status", "unpaid")
+    user.is_paid = bool(before.get("is_paid", False))
+    user.payment_status = before.get("payment_status", "unpaid")
+    user.onboarding_completed = bool(before.get("onboarding_completed", False))
+    db.add(user)
+    db.add(
+        AuditLog(
+            actor_tg_user_id=None,
+            action="rollback_user",
+            target_tg_user_id=tg_user_id,
+            payload_json=json.dumps({"source_audit_id": log.id}, ensure_ascii=False),
+        )
+    )
+    db.commit()
+    return {"ok": True, "tg_user_id": tg_user_id, "status": user.status}

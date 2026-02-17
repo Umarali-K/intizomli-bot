@@ -15,6 +15,8 @@ class Settings:
     ADMIN_TG_IDS: str = os.getenv("ADMIN_TG_IDS", "")
     ADMIN_API_TOKEN: str = os.getenv("ADMIN_API_TOKEN", "").strip()
     ADMIN_CONFIRM_TOKEN: str = os.getenv("ADMIN_CONFIRM_TOKEN", "").strip()
+    ACTIVATION_CODE_TTL_HOURS: int = int(os.getenv("ACTIVATION_CODE_TTL_HOURS", "720"))
+    RETENTION_DAYS: str = os.getenv("RETENTION_DAYS", "2,3,5")
     PAYMENT_MODE: str = os.getenv("PAYMENT_MODE", "manual_code").strip().lower()
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./intizomli.db")
     AUTO_CREATE_SCHEMA: bool = os.getenv("AUTO_CREATE_SCHEMA", "0") == "1"

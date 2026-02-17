@@ -43,5 +43,7 @@ class User(Base):
     last_weekly_review_sent_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     certificate_issued: Mapped[bool] = mapped_column(Boolean, default=False)
     certificate_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    device_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    device_bound_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     cashback_balance_uzs: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

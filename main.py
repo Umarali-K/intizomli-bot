@@ -1,9 +1,10 @@
 import json
+import io
 import os
 import random
 import string
+from datetime import date, datetime, timedelta
 from datetime import time as dtime
-from datetime import date
 from pathlib import Path
 from typing import List
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -16,7 +17,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 from app.crud import create_referral, get_referral_count, get_reportable_users, get_user_by_tg_id, upsert_user
 from app.db import SessionLocal
-from app.models import ActivationCode, Challenge, DailyModuleReport, PaymentTransaction, Referral, User
+from app.models import ActivationCode, AuditLog, Challenge, DailyModuleReport, PaymentTransaction, Referral, User
 
 ROOT_DIR = Path(__file__).resolve().parent
 load_dotenv(ROOT_DIR / ".env")
@@ -36,6 +37,8 @@ API_PUBLIC_URL = _clean_env_url(os.getenv("API_PUBLIC_URL", "http://localhost:80
 BOT_TIMEZONE = os.getenv("BOT_TIMEZONE", "Asia/Tashkent")
 REMINDER_HOURS = [int(x) for x in os.getenv("REMINDER_HOURS", "9,14,21").split(",") if x.strip()]
 ADMIN_TG_IDS = {int(x.strip()) for x in os.getenv("ADMIN_TG_IDS", "").split(",") if x.strip().isdigit()}
+ACTIVATION_CODE_TTL_HOURS = int(os.getenv("ACTIVATION_CODE_TTL_HOURS", "720"))
+RETENTION_DAYS = [int(x.strip()) for x in os.getenv("RETENTION_DAYS", "2,3,5").split(",") if x.strip().isdigit()]
 
 
 def build_miniapp_url() -> str:
@@ -209,6 +212,7 @@ async def create_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 target_tg_user_id=target_tg_user_id,
                 created_by_tg_user_id=user_id,
                 is_used=False,
+                expires_at=datetime.utcnow() + timedelta(hours=ACTIVATION_CODE_TTL_HOURS),
             )
         )
         db.commit()
@@ -248,6 +252,7 @@ async def create_codes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     target_tg_user_id=None,
                     created_by_tg_user_id=user_id,
                     is_used=False,
+                    expires_at=datetime.utcnow() + timedelta(hours=ACTIVATION_CODE_TTL_HOURS),
                 )
             )
             created.append(code)
@@ -429,15 +434,83 @@ async def admin_kick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if not user:
             await update.message.reply_text("❌ User topilmadi.")
             return
+        before = {
+            "status": user.status,
+            "is_paid": user.is_paid,
+            "payment_status": user.payment_status,
+            "onboarding_completed": user.onboarding_completed,
+        }
         user.status = "kicked"
         user.is_paid = False
         user.payment_status = "kicked"
         user.onboarding_completed = False
         db.add(user)
+        db.add(
+            AuditLog(
+                actor_tg_user_id=admin_id,
+                action="kick_user",
+                target_tg_user_id=target_tg_id,
+                payload_json=json.dumps({"before": before, "reason": "admin kick"}, ensure_ascii=False),
+            )
+        )
         db.commit()
         label = _user_label(user)
 
     await update.message.reply_text(f"⛔️ Marafondan chiqarildi:\n{label}")
+
+
+async def admin_rollback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = update.effective_user.id
+    if not _is_admin(admin_id):
+        await update.message.reply_text("❌ Siz admin emassiz.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Foydalanish: /rollback <tg_user_id>")
+        return
+    try:
+        target_tg_id = int(context.args[0])
+    except Exception:
+        await update.message.reply_text("❌ tg_user_id noto'g'ri.")
+        return
+
+    with SessionLocal() as db:
+        user = get_user_by_tg_id(db, target_tg_id)
+        if not user:
+            await update.message.reply_text("❌ User topilmadi.")
+            return
+        log = db.scalar(
+            select(AuditLog)
+            .where(and_(AuditLog.action == "kick_user", AuditLog.target_tg_user_id == target_tg_id))
+            .order_by(AuditLog.created_at.desc())
+        )
+        if not log or not log.payload_json:
+            await update.message.reply_text("❌ Rollback uchun oldingi holat topilmadi.")
+            return
+        try:
+            payload = json.loads(log.payload_json)
+            before = payload.get("before", {})
+        except Exception:
+            await update.message.reply_text("❌ Rollback payload buzilgan.")
+            return
+
+        user.status = before.get("status", "unpaid")
+        user.is_paid = bool(before.get("is_paid", False))
+        user.payment_status = before.get("payment_status", "unpaid")
+        user.onboarding_completed = bool(before.get("onboarding_completed", False))
+        db.add(user)
+        db.add(
+            AuditLog(
+                actor_tg_user_id=admin_id,
+                action="rollback_user",
+                target_tg_user_id=target_tg_id,
+                payload_json=json.dumps({"source_audit_id": log.id}, ensure_ascii=False),
+            )
+        )
+        db.commit()
+        label = _user_label(user)
+
+    await update.message.reply_text(f"♻️ Rollback bajarildi:\n{label}")
 
 
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -458,6 +531,93 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         name = (u.full_name or u.first_name or u.username or f"User {u.tg_user_id}").strip()
         lines.append(f"{i}. {name} — {u.rating_points} ball | streak {u.current_streak}")
     await update.message.reply_text("🏆 *Top 10 Leaderboard*\n\n" + "\n".join(lines), parse_mode="Markdown")
+
+
+def _build_backup_payload(db) -> dict:
+    users = list(db.scalars(select(User)))
+    codes = list(db.scalars(select(ActivationCode)))
+    txs = list(db.scalars(select(PaymentTransaction)))
+    reports_count = db.scalar(select(func.count()).select_from(DailyModuleReport)) or 0
+    payload = {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "counts": {
+            "users": len(users),
+            "activation_codes": len(codes),
+            "payment_transactions": len(txs),
+            "daily_reports": int(reports_count),
+        },
+        "users": [
+            {
+                "tg_user_id": u.tg_user_id,
+                "full_name": u.full_name,
+                "username": u.username,
+                "status": u.status,
+                "payment_status": u.payment_status,
+                "rating_points": u.rating_points,
+                "current_streak": u.current_streak,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            }
+            for u in users
+        ],
+    }
+    return payload
+
+
+def _backup_restore_test(payload: dict) -> dict:
+    counts = payload.get("counts") or {}
+    users = payload.get("users") or []
+    ok = isinstance(counts, dict) and isinstance(users, list)
+    if ok and int(counts.get("users", -1)) != len(users):
+        ok = False
+    return {
+        "ok": ok,
+        "users_count": len(users),
+    }
+
+
+async def backup_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = update.effective_user.id
+    if not _is_admin(admin_id):
+        await update.message.reply_text("❌ Siz admin emassiz.")
+        return
+
+    with SessionLocal() as db:
+        payload = _build_backup_payload(db)
+        restore_test = _backup_restore_test(payload)
+        db.add(
+            AuditLog(
+                actor_tg_user_id=admin_id,
+                action="backup_now",
+                target_tg_user_id=None,
+                payload_json=json.dumps({"restore_test": restore_test}, ensure_ascii=False),
+            )
+        )
+        db.commit()
+
+    raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    buf = io.BytesIO(raw)
+    buf.name = f"intizomli-backup-{date.today().isoformat()}.json"
+    await update.message.reply_document(document=buf, caption=f"Backup tayyor. Restore test: {restore_test['ok']}")
+
+
+async def restore_test(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = update.effective_user.id
+    if not _is_admin(admin_id):
+        await update.message.reply_text("❌ Siz admin emassiz.")
+        return
+    with SessionLocal() as db:
+        payload = _build_backup_payload(db)
+        result = _backup_restore_test(payload)
+        db.add(
+            AuditLog(
+                actor_tg_user_id=admin_id,
+                action="restore_test",
+                target_tg_user_id=None,
+                payload_json=json.dumps(result, ensure_ascii=False),
+            )
+        )
+        db.commit()
+    await update.message.reply_text(f"🧪 Restore test natijasi: {'OK' if result['ok'] else 'FAILED'}")
 
 
 async def weekly_review_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -502,6 +662,71 @@ async def weekly_review_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 await context.bot.send_message(chat_id=user.tg_user_id, text=msg, parse_mode="Markdown")
             except Exception:
                 continue
+
+
+async def retention_campaign_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    retention_points = sorted(set([x for x in RETENTION_DAYS if x > 0]))
+    if not retention_points:
+        return
+    today = date.today()
+    with SessionLocal() as db:
+        users = list(db.scalars(select(User).where(User.payment_status == "paid")))
+        for user in users:
+            last_report = db.scalar(
+                select(func.max(DailyModuleReport.report_date)).where(DailyModuleReport.user_id == user.id)
+            )
+            if not last_report:
+                days_missed = 999
+            else:
+                days_missed = (today - last_report).days
+            if days_missed not in retention_points:
+                continue
+
+            if days_missed == 2:
+                msg = "⏳ Siz 2 kundan beri hisobot yubormadingiz. Bugun qaytib ritmni tiklang."
+            elif days_missed == 3:
+                msg = "⚠️ 3 kunlik uzilish bor. Bugun hisobot yuborib streakni qayta yoqing."
+            else:
+                msg = "🚨 5 kunlik tanaffus. Marafonga qaytish uchun bugun kamida 1 modulni bajaring."
+            try:
+                await context.bot.send_message(
+                    chat_id=user.tg_user_id,
+                    text=msg,
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("📱 Mini Appni ochish", web_app=WebAppInfo(url=build_miniapp_url()))]]
+                    ),
+                )
+            except Exception:
+                continue
+
+
+async def nightly_backup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not ADMIN_TG_IDS:
+        return
+    with SessionLocal() as db:
+        payload = _build_backup_payload(db)
+        restore_test = _backup_restore_test(payload)
+        db.add(
+            AuditLog(
+                actor_tg_user_id=None,
+                action="nightly_backup",
+                target_tg_user_id=None,
+                payload_json=json.dumps({"restore_test": restore_test}, ensure_ascii=False),
+            )
+        )
+        db.commit()
+    raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    for admin_id in ADMIN_TG_IDS:
+        try:
+            buf = io.BytesIO(raw)
+            buf.name = f"intizomli-backup-{date.today().isoformat()}.json"
+            await context.bot.send_document(
+                chat_id=admin_id,
+                document=buf,
+                caption=f"🌙 Nightly backup. Restore test: {'OK' if restore_test['ok'] else 'FAILED'}",
+            )
+        except Exception:
+            continue
 
 
 async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -600,7 +825,10 @@ def run() -> None:
     app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(CommandHandler("missed", admin_missed))
     app.add_handler(CommandHandler("kick", admin_kick))
+    app.add_handler(CommandHandler("rollback", admin_rollback))
     app.add_handler(CommandHandler("leaderboard", leaderboard))
+    app.add_handler(CommandHandler("backupnow", backup_now))
+    app.add_handler(CommandHandler("restoretest", restore_test))
     app.add_handler(CallbackQueryHandler(on_menu, pattern=r"^menu:"))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, on_webapp_data))
 
@@ -622,6 +850,18 @@ def run() -> None:
             time=dtime(hour=21, minute=30, tzinfo=tz),
             name="weekly-review",
             data={"kind": "weekly-review"},
+        )
+        app.job_queue.run_daily(
+            retention_campaign_job,
+            time=dtime(hour=10, minute=30, tzinfo=tz),
+            name="retention-campaign",
+            data={"kind": "retention"},
+        )
+        app.job_queue.run_daily(
+            nightly_backup_job,
+            time=dtime(hour=23, minute=45, tzinfo=tz),
+            name="nightly-backup",
+            data={"kind": "backup"},
         )
 
     print("✅ Bot ishga tushdi...")

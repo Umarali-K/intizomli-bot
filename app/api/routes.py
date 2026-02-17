@@ -11,8 +11,9 @@ from sqlalchemy import Integer, and_, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.config import settings
 from app.crud import get_referral_count, upsert_user
-from app.models import ActivationCode, Challenge, DailyModuleReport, PaymentTransaction, User
+from app.models import ActivationCode, AuditLog, Challenge, DailyModuleReport, PaymentTransaction, User, UserAchievement
 
 router = APIRouter()
 
@@ -163,6 +164,47 @@ def _issue_certificate_if_ready(user: User) -> None:
     code = f"CERT-{user.tg_user_id}-{day_no}"
     user.certificate_issued = True
     user.certificate_code = code
+
+
+ACHIEVEMENTS = [
+    {"code": "streak_7", "name": "7 kun streak", "description": "7 kun ketma-ket hisobot topshirildi."},
+    {"code": "streak_14", "name": "14 kun streak", "description": "14 kun ketma-ket hisobot topshirildi."},
+    {"code": "week_100", "name": "100% hafta", "description": "Bir haftada barcha vazifalar to'liq bajarildi."},
+    {"code": "sport_master", "name": "Sport ustasi", "description": "Sport modulida yuqori intizom ko'rsatildi."},
+]
+
+
+def _audit(db: Session, actor_tg_user_id: Optional[int], action: str, target_tg_user_id: Optional[int], payload: Any) -> None:
+    db.add(
+        AuditLog(
+            actor_tg_user_id=actor_tg_user_id,
+            action=action,
+            target_tg_user_id=target_tg_user_id,
+            payload_json=json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+        )
+    )
+
+
+def _grant_achievement(db: Session, user: User, code: str) -> bool:
+    ach = next((x for x in ACHIEVEMENTS if x["code"] == code), None)
+    if not ach:
+        return False
+    existing = db.scalar(
+        select(UserAchievement).where(
+            and_(UserAchievement.user_id == user.id, UserAchievement.code == code)
+        )
+    )
+    if existing:
+        return False
+    db.add(
+        UserAchievement(
+            user_id=user.id,
+            code=ach["code"],
+            name=ach["name"],
+            description=ach["description"],
+        )
+    )
+    return True
 
 
 def _challenge_tasks(numbers: List[int]) -> List[str]:
@@ -348,6 +390,14 @@ def app_bootstrap(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dic
         raise HTTPException(status_code=400, detail="tg_user_id required")
 
     user = upsert_user(db, tg_user_id, payload.get("username"), payload.get("first_name"))
+    device_id = str(payload.get("device_id", "")).strip()[:128] or None
+    if user.device_fingerprint and device_id and user.device_fingerprint != device_id:
+        raise HTTPException(status_code=403, detail="Bu akkaunt boshqa qurilmaga bog'langan.")
+    if not user.device_fingerprint and device_id:
+        user.device_fingerprint = device_id
+        user.device_bound_at = datetime.utcnow()
+        db.add(user)
+        db.commit()
     referral_count = get_referral_count(db, tg_user_id)
 
     return {
@@ -497,9 +547,10 @@ def app_setup(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dict[st
     user.reading_book = reading_book if "reading" in modules else None
     user.reading_task = reading_task
     reminder_hours = [int(x) for x in payload.get("reminder_hours", [9, 14, 21]) if 0 <= int(x) <= 23]
-    if len(reminder_hours) != 3:
+    reminder_hours_unique = sorted(set(reminder_hours))
+    if len(reminder_hours_unique) != 3:
         raise HTTPException(status_code=400, detail="exactly 3 reminder hours required")
-    user.reminder_hours_json = ",".join([str(x) for x in sorted(set(reminder_hours))])
+    user.reminder_hours_json = ",".join([str(x) for x in reminder_hours_unique])
     user.onboarding_completed = True
     user.status = "setup_done"
 
@@ -564,16 +615,27 @@ def payment_confirm(
 def payment_verify_code(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dict[str, Any]:
     tg_user_id = int(payload.get("tg_user_id", 0))
     code = str(payload.get("code", "")).strip().upper()
+    device_id = str(payload.get("device_id", "")).strip()[:128] or None
     if not tg_user_id or not code:
         raise HTTPException(status_code=400, detail="tg_user_id and code required")
 
     user = _get_user_or_404(db, tg_user_id)
+    if user.device_fingerprint and device_id and user.device_fingerprint != device_id:
+        raise HTTPException(status_code=403, detail="device mismatch")
+    if user.device_fingerprint and not device_id:
+        raise HTTPException(status_code=403, detail="device id required")
+    if not user.device_fingerprint and device_id:
+        user.device_fingerprint = device_id
+        user.device_bound_at = datetime.utcnow()
+
     if user.payment_status == "paid":
         return {"ok": True, "already_paid": True, "payment_status": "paid", "marathon_started": True}
 
     ac = db.scalar(select(ActivationCode).where(ActivationCode.code == code))
     if not ac:
         raise HTTPException(status_code=404, detail="code not found")
+    if ac.expires_at and datetime.utcnow() > ac.expires_at:
+        raise HTTPException(status_code=400, detail="code expired")
     if ac.is_used:
         raise HTTPException(status_code=400, detail="code already used")
     if ac.target_tg_user_id and ac.target_tg_user_id != tg_user_id:
@@ -583,6 +645,13 @@ def payment_verify_code(payload: Dict[str, Any], db: Session = Depends(get_db)) 
     ac.used_by_tg_user_id = tg_user_id
     ac.used_at = datetime.utcnow()
     _activate_user(user)
+    _audit(
+        db,
+        actor_tg_user_id=tg_user_id,
+        action="verify_code_payment",
+        target_tg_user_id=tg_user_id,
+        payload={"code": code, "device_bound": bool(user.device_fingerprint)},
+    )
     db.add_all([ac, user])
     db.commit()
 
@@ -959,6 +1028,13 @@ def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     _issue_certificate_if_ready(user)
     db.add(user)
     db.commit()
+    achievements = list(
+        db.scalars(
+            select(UserAchievement)
+            .where(UserAchievement.user_id == user.id)
+            .order_by(UserAchievement.earned_at.desc())
+        )
+    )
 
     return {
         "tg_user_id": user.tg_user_id,
@@ -989,6 +1065,15 @@ def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
         "admin_url": f"https://t.me/{ADMIN_CONTACT_USERNAME}" if ADMIN_CONTACT_USERNAME else None,
         "certificate_issued": user.certificate_issued,
         "certificate_code": user.certificate_code,
+        "achievements": [
+            {
+                "code": a.code,
+                "name": a.name,
+                "description": a.description,
+                "earned_at": a.earned_at.isoformat() if a.earned_at else None,
+            }
+            for a in achievements
+        ],
     }
 
 
@@ -1081,7 +1166,45 @@ def app_daily_report(payload: Dict[str, Any], db: Session = Depends(get_db)) -> 
 
     user.last_report_date = report_date
     _issue_certificate_if_ready(user)
+    awarded: List[str] = []
+    if user.current_streak >= 7 and _grant_achievement(db, user, "streak_7"):
+        awarded.append("streak_7")
+    if user.current_streak >= 14 and _grant_achievement(db, user, "streak_14"):
+        awarded.append("streak_14")
+    sports_total = total_by_module.get("sports", 0)
+    sports_done = done_by_module.get("sports", 0)
+    if sports_total and sports_done == sports_total and _grant_achievement(db, user, "sport_master"):
+        awarded.append("sport_master")
+    week_start = report_date.fromordinal(report_date.toordinal() - min(report_date.weekday(), 6))
+    week_rows = db.execute(
+        select(
+            func.count().label("total"),
+            func.sum(func.cast(DailyModuleReport.is_done, Integer)).label("done"),
+        ).where(
+            and_(
+                DailyModuleReport.user_id == user.id,
+                DailyModuleReport.report_date >= week_start,
+                DailyModuleReport.report_date <= report_date,
+            )
+        )
+    ).first()
+    w_total = int((week_rows[0] if week_rows else 0) or 0)
+    w_done = int((week_rows[1] if week_rows else 0) or 0)
+    if w_total > 0 and w_done == w_total and _grant_achievement(db, user, "week_100"):
+        awarded.append("week_100")
     db.add(user)
+    _audit(
+        db,
+        actor_tg_user_id=user.tg_user_id,
+        action="daily_report_submitted",
+        target_tg_user_id=user.tg_user_id,
+        payload={
+            "report_date": report_date.isoformat(),
+            "daily_score": weighted_score,
+            "percent": percent,
+            "awarded": awarded,
+        },
+    )
     db.commit()
 
     return {
@@ -1094,6 +1217,7 @@ def app_daily_report(payload: Dict[str, Any], db: Session = Depends(get_db)) -> 
         "rating": user.rating_points,
         "streak": user.current_streak,
         "streak_freeze_used": user.streak_freeze_used,
+        "awarded_achievements": awarded,
     }
 
 

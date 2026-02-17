@@ -1,5 +1,6 @@
 from app.models.base import Base
 from app.models.activation_code import ActivationCode
+from app.models.audit_log import AuditLog
 from app.models.cashback import Cashback
 from app.models.challenge import Challenge
 from app.models.daily_module_report import DailyModuleReport
@@ -9,10 +10,12 @@ from app.models.onboarding_answer import OnboardingAnswer
 from app.models.payment_transaction import PaymentTransaction
 from app.models.referral import Referral
 from app.models.user import User
+from app.models.user_achievement import UserAchievement
 
 __all__ = [
     "Base",
     "ActivationCode",
+    "AuditLog",
     "User",
     "HabitDefinition",
     "HabitReport",
@@ -22,4 +25,5 @@ __all__ = [
     "Challenge",
     "Cashback",
     "PaymentTransaction",
+    "UserAchievement",
 ]

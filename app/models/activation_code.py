@@ -17,4 +17,5 @@ class ActivationCode(Base):
     is_used: Mapped[bool] = mapped_column(Boolean, default=False)
     used_by_tg_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
