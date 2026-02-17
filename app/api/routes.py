@@ -50,6 +50,16 @@ CHALLENGE_POOL = {
     9: "Erta uyqu",
     10: "Tongda yugurish",
 }
+WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+WEEKDAY_UZ = {
+    "mon": "Dushanba",
+    "tue": "Seshanba",
+    "wed": "Chorshanba",
+    "thu": "Payshanba",
+    "fri": "Juma",
+    "sat": "Shanba",
+    "sun": "Yakshanba",
+}
 
 
 def _dumps(items: List[str]) -> str:
@@ -66,6 +76,38 @@ def _loads(value: Optional[str]) -> List[str]:
     except Exception:
         pass
     return []
+
+
+def _loads_any_json(value: Optional[str], default: Any) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
+def _normalize_days(raw_days: Any) -> List[str]:
+    if not isinstance(raw_days, list):
+        return ["daily"]
+    days: List[str] = []
+    for item in raw_days:
+        val = str(item).strip().lower()
+        if val == "daily":
+            return ["daily"]
+        if val in WEEKDAY_KEYS and val not in days:
+            days.append(val)
+    return days or ["daily"]
+
+
+def _today_day_key() -> str:
+    return WEEKDAY_KEYS[date.today().weekday()]
+
+
+def _is_today_selected(days: List[str]) -> bool:
+    if "daily" in days:
+        return True
+    return _today_day_key() in days
 
 
 def _get_user_or_404(db: Session, tg_user_id: int) -> User:
@@ -212,13 +254,36 @@ def _daily_items_for_user(db: Session, user: User) -> Dict[str, List[str]]:
     result: Dict[str, List[str]] = {}
 
     if "habits" in modules:
-        result["habits"] = _loads(user.habits_json)
+        habits_raw = _loads_any_json(user.habits_json, [])
+        habits_items: List[str] = []
+        if habits_raw and isinstance(habits_raw[0], str):
+            habits_items = [str(x) for x in habits_raw]
+        else:
+            for item in habits_raw:
+                name = str((item or {}).get("name", "")).strip()
+                days = _normalize_days((item or {}).get("days", ["daily"]))
+                if name and _is_today_selected(days):
+                    habits_items.append(name)
+        result["habits"] = habits_items
     if "sports" in modules:
-        result["sports"] = _loads(user.sports_json)
+        sports_raw = _loads_any_json(user.sports_json, [])
+        sports_items: List[str] = []
+        if sports_raw and isinstance(sports_raw[0], str):
+            sports_items = [str(x) for x in sports_raw]
+        else:
+            for item in sports_raw:
+                name = str((item or {}).get("name", "")).strip()
+                days = _normalize_days((item or {}).get("days", ["daily"]))
+                target = (item or {}).get("target_count")
+                if not name or not _is_today_selected(days):
+                    continue
+                if isinstance(target, int) and target > 0:
+                    sports_items.append(f"{name} ({target} marta)")
+                else:
+                    sports_items.append(name)
+        result["sports"] = sports_items
     if "reading" in modules:
-        result["reading"] = [user.reading_task or "30-50 bet"]
-    if "lessons" in modules:
-        result["lessons"] = ["Bugungi darsni ko'rish"]
+        result["reading"] = [f"{user.reading_book or 'Intizom kuchi'} — {user.reading_task or '30 bet'}"]
 
     day_no = _marathon_day(user)
     if "challenge" in modules and day_no >= 5:
@@ -256,7 +321,9 @@ def app_bootstrap(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dic
         "templates": {
             "habits": HABIT_TEMPLATES,
             "sports": SPORT_TEMPLATES,
-            "modules": ["habits", "sports", "reading", "challenge", "lessons"],
+            "modules": ["habits", "sports", "reading"],
+            "default_book": "Intizom kuchi",
+            "weekdays": [{"key": key, "label": WEEKDAY_UZ[key]} for key in WEEKDAY_KEYS],
         },
         "payment": {
             "mode": PAYMENT_MODE,
@@ -279,17 +346,37 @@ def app_bootstrap(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dic
 def app_register(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dict[str, Any]:
     user = _get_user_or_404(db, int(payload.get("tg_user_id", 0)))
 
-    required = ["full_name", "age", "location", "goal", "pains", "expectations"]
-    for key in required:
-        if not payload.get(key):
-            raise HTTPException(status_code=400, detail=f"{key} required")
+    full_name = str(payload.get("full_name") or "").strip()
+    location = str(payload.get("location") or "").strip()
+    goal = str(payload.get("goal") or "").strip()
+    pains = str(payload.get("pains") or "").strip()
+    expectations = str(payload.get("expectations") or "").strip()
 
-    user.full_name = str(payload["full_name"])
-    user.age = int(payload["age"])
-    user.location = str(payload["location"])
-    user.goal = str(payload["goal"])
-    user.pains = str(payload["pains"])
-    user.expectations = str(payload["expectations"])
+    if len(full_name) < 3:
+        raise HTTPException(status_code=400, detail="Iltimos, 'Ism familiya' bo'limini to'g'ri to'ldiring.")
+    if len(location) < 2:
+        raise HTTPException(status_code=400, detail="Iltimos, 'Qayerdanligi' bo'limini to'g'ri to'ldiring.")
+    if len(goal) < 5:
+        raise HTTPException(status_code=400, detail="Iltimos, 'Maqsad' bo'limini to'g'ri to'ldiring.")
+    if len(pains) < 5:
+        raise HTTPException(status_code=400, detail="Iltimos, 'Og'riqlar va muammolar' bo'limini to'g'ri to'ldiring.")
+    if len(expectations) < 5:
+        raise HTTPException(status_code=400, detail="Iltimos, 'Kutilmalar' bo'limini to'g'ri to'ldiring.")
+
+    raw_age = payload.get("age")
+    try:
+        age = int(str(raw_age).strip())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Iltimos, 'Yosh' bo'limini raqamda to'g'ri kiriting.") from exc
+    if age < 9 or age > 80:
+        raise HTTPException(status_code=400, detail="Iltimos, 'Yosh' bo'limini to'g'ri to'ldiring (9..80).")
+
+    user.full_name = full_name
+    user.age = age
+    user.location = location
+    user.goal = goal
+    user.pains = pains
+    user.expectations = expectations
     user.registration_completed = True
     db.add(user)
     db.commit()
@@ -303,24 +390,78 @@ def app_setup(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dict[st
     if not user.registration_completed:
         raise HTTPException(status_code=400, detail="complete registration first")
 
-    modules = [str(x) for x in payload.get("modules", [])]
-    modules = [m for m in modules if m in {"habits", "sports", "reading", "challenge", "lessons"}]
+    allowed_modules = {"habits", "sports", "reading"}
+    modules = [str(x).strip() for x in payload.get("modules", []) if str(x).strip() in allowed_modules]
+    modules = list(dict.fromkeys(modules))
     if not modules:
-        raise HTTPException(status_code=400, detail="at least one module required")
+        raise HTTPException(status_code=400, detail="Kamida bitta modul tanlang.")
 
-    habits = [str(x).strip() for x in payload.get("habits", []) if str(x).strip()]
-    sports = [str(x).strip() for x in payload.get("sports", []) if str(x).strip()]
+    setup = payload.get("setup") if isinstance(payload.get("setup"), dict) else {}
+    raw_habits = setup.get("habits", payload.get("habits", []))
+    raw_sports = setup.get("sports", payload.get("sports", []))
+    raw_reading = setup.get("reading", {})
 
-    if "habits" in modules and (len(habits) < 3 or len(habits) > 6):
-        raise HTTPException(status_code=400, detail="habits: 3..6 required")
-    if "sports" in modules and (len(sports) < 1 or len(sports) > 3):
-        raise HTTPException(status_code=400, detail="sports: 1..3 required")
+    habits_plan: List[Dict[str, Any]] = []
+    if "habits" in modules:
+        if not isinstance(raw_habits, list):
+            raise HTTPException(status_code=400, detail="Odatlar ro'yxati noto'g'ri.")
+        for item in raw_habits:
+            if isinstance(item, str):
+                name = item.strip()
+                days = ["daily"]
+            else:
+                name = str((item or {}).get("name", "")).strip()
+                days = _normalize_days((item or {}).get("days", ["daily"]))
+            if not name:
+                continue
+            habits_plan.append({"name": name, "days": days})
+        if len(habits_plan) < 3 or len(habits_plan) > 6:
+            raise HTTPException(status_code=400, detail="Odatlar soni 3 tadan 6 tagacha bo'lishi kerak.")
+
+    sports_plan: List[Dict[str, Any]] = []
+    if "sports" in modules:
+        if not isinstance(raw_sports, list):
+            raise HTTPException(status_code=400, detail="Sport ro'yxati noto'g'ri.")
+        for item in raw_sports:
+            if isinstance(item, str):
+                name = item.strip()
+                days = ["daily"]
+                target = None
+            else:
+                name = str((item or {}).get("name", "")).strip()
+                days = _normalize_days((item or {}).get("days", ["daily"]))
+                target_raw = (item or {}).get("target_count")
+                try:
+                    target = int(target_raw) if target_raw not in (None, "", 0) else None
+                except Exception:
+                    target = None
+            if not name:
+                continue
+            sports_plan.append({"name": name, "days": days, "target_count": target})
+        if len(sports_plan) < 1 or len(sports_plan) > 3:
+            raise HTTPException(status_code=400, detail="Sportlar soni 1 tadan 3 tagacha bo'lishi kerak.")
+
+    reading_payload = raw_reading if isinstance(raw_reading, dict) else {}
+    reading_book = str(
+        reading_payload.get("book")
+        or payload.get("reading_book")
+        or "Intizom kuchi"
+    ).strip()
+    reading_pages_raw = reading_payload.get("pages_per_day", payload.get("reading_pages_per_day", 30))
+    try:
+        reading_pages = int(reading_pages_raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Mutolaa sahifa miqdorini raqamda kiriting.") from exc
+    if "reading" in modules and (reading_pages < 1 or reading_pages > 300):
+        raise HTTPException(status_code=400, detail="Mutolaa sahifasi 1 dan 300 gacha bo'lishi kerak.")
+
+    reading_task = f"{reading_pages} bet" if "reading" in modules else None
 
     user.selected_modules_json = _dumps(modules)
-    user.habits_json = _dumps(habits)
-    user.sports_json = _dumps(sports)
-    user.reading_book = str(payload.get("reading_book") or "") or None
-    user.reading_task = str(payload.get("reading_task") or "") or None
+    user.habits_json = json.dumps(habits_plan, ensure_ascii=False)
+    user.sports_json = json.dumps(sports_plan, ensure_ascii=False)
+    user.reading_book = reading_book if "reading" in modules else None
+    user.reading_task = reading_task
     reminder_hours = [int(x) for x in payload.get("reminder_hours", [9, 14, 21]) if 0 <= int(x) <= 23]
     if len(reminder_hours) != 3:
         raise HTTPException(status_code=400, detail="exactly 3 reminder hours required")
@@ -331,7 +472,15 @@ def app_setup(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dict[st
     db.add(user)
     db.commit()
 
-    return {"ok": True, "setup_completed": True, "modules": modules}
+    return {
+        "ok": True,
+        "setup_completed": True,
+        "modules": modules,
+        "habits_count": len(habits_plan),
+        "sports_count": len(sports_plan),
+        "reading_book": user.reading_book,
+        "reading_pages": reading_pages if "reading" in modules else 0,
+    }
 
 
 @router.post("/v1/app/payment/request")
@@ -352,6 +501,7 @@ def payment_request(payload: Dict[str, Any], db: Session = Depends(get_db)) -> D
         "note": "Admin profilga to'lov qilib, maxsus kodni mini appga kiriting.",
         "admin_username": ADMIN_CONTACT_USERNAME,
         "admin_url": f"https://t.me/{ADMIN_CONTACT_USERNAME}" if ADMIN_CONTACT_USERNAME else None,
+        "admin_tg_deep_link": f"tg://resolve?domain={ADMIN_CONTACT_USERNAME}" if ADMIN_CONTACT_USERNAME else None,
         "provider": "manual_code",
     }
 
@@ -759,12 +909,27 @@ async def payment_click_merchant(request: Request, db: Session = Depends(get_db)
 def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     user = _get_user_or_404(db, tg_user_id)
     modules = _loads(user.selected_modules_json)
+    habits_raw = _loads_any_json(user.habits_json, [])
+    sports_raw = _loads_any_json(user.sports_json, [])
+    if habits_raw and isinstance(habits_raw[0], str):
+        habits_raw = [{"name": str(x), "days": ["daily"]} for x in habits_raw]
+    if sports_raw and isinstance(sports_raw[0], str):
+        sports_raw = [{"name": str(x), "days": ["daily"], "target_count": None} for x in sports_raw]
+    reading_pages = 30
+    if user.reading_task:
+        try:
+            reading_pages = int(str(user.reading_task).split()[0])
+        except Exception:
+            reading_pages = 30
 
     return {
         "tg_user_id": user.tg_user_id,
         "full_name": user.full_name,
         "age": user.age,
         "location": user.location,
+        "goal": user.goal,
+        "pains": user.pains,
+        "expectations": user.expectations,
         "registration_completed": user.registration_completed,
         "setup_completed": _is_setup_completed(user),
         "payment_status": user.payment_status,
@@ -773,10 +938,11 @@ def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
         "marathon_day": _marathon_day(user),
         "marathon_days": user.marathon_days,
         "modules": modules,
-        "habits": _loads(user.habits_json),
-        "sports": _loads(user.sports_json),
+        "habits": habits_raw,
+        "sports": sports_raw,
         "reading_book": user.reading_book,
         "reading_task": user.reading_task,
+        "reading_pages_per_day": reading_pages,
         "reminder_hours": [int(x) for x in (user.reminder_hours_json or "09,14,21").split(",") if x],
         "referral_count": get_referral_count(db, tg_user_id),
         "payment_mode": PAYMENT_MODE,
@@ -946,6 +1112,12 @@ def profile(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     day_no = _marathon_day(user)
     return {
         "tg_user_id": tg_user_id,
+        "full_name": user.full_name,
+        "age": user.age,
+        "location": user.location,
+        "goal": user.goal,
+        "pains": user.pains,
+        "expectations": user.expectations,
         "status": user.status,
         "is_paid": user.is_paid,
         "onboarding_completed": user.onboarding_completed,

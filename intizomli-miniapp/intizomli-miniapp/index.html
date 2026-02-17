@@ -14,7 +14,7 @@
       --muted: #9db0cf;
       --ok: #1fc77e;
       --warn: #f2ad22;
-      --danger: #e15858;
+      --danger: #ff6b6b;
       --brand: #2a63ff;
     }
     * { box-sizing: border-box; }
@@ -25,325 +25,526 @@
     .sub { color: var(--muted); margin: 0 0 10px; }
     .row { display:flex; flex-wrap:wrap; gap:8px; }
     .badge { border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
-    .pill { padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; min-width: 110px; }
     .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }
-    .input, .textarea { width:100%; background:#0d1b31; color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:10px; }
-    .textarea { min-height:78px; resize:vertical; }
+    .input, .textarea, select { width:100%; background:#0d1b31; color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:10px; }
+    .textarea { min-height:80px; resize:vertical; }
     .btn { background:#22395f; border:1px solid var(--line); color:var(--txt); border-radius:10px; padding:10px 12px; cursor:pointer; }
     .btn.primary { background:var(--brand); border-color:var(--brand); }
-    .btn.ok { background:var(--ok); border-color:var(--ok); color:#062415; }
     .btn.warn { background:var(--warn); border-color:var(--warn); color:#271a03; }
-    .muted { color: var(--muted); font-size: 13px; }
+    .btn.ok { background:var(--ok); border-color:var(--ok); color:#062415; }
     .list { display:flex; flex-direction:column; gap:8px; }
-    label.item { display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:10px; padding:8px; }
+    .item { border:1px solid var(--line); border-radius:10px; padding:8px; }
+    .muted { color:var(--muted); font-size:13px; }
+    .err { color: var(--danger); font-weight: 600; }
+    .ok { color: var(--ok); font-weight: 600; }
+    .hidden { display:none; }
+    .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+    .chip { border:1px solid var(--line); border-radius:999px; padding:4px 8px; font-size:12px; cursor:pointer; color:var(--muted); }
+    .chip.active { border-color:#4ea3ff; color:#cde3ff; background:rgba(78,163,255,.18); }
+    .section-title { margin: 0 0 6px; font-size: 17px; }
     .progress { height:10px; background:#0c1930; border:1px solid var(--line); border-radius:999px; overflow:hidden; }
     .progress > div { height:100%; background:linear-gradient(90deg, #3ba5ff, #42da94); width:0%; }
     table { width:100%; border-collapse: collapse; }
     th, td { border-bottom:1px solid var(--line); padding:6px; text-align:left; font-size:12px; }
-    .hidden { display:none; }
     @media (max-width: 760px){ .grid{ grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <h1 class="title">🔥 Intizomli Erkak</h1>
-      <p class="sub">Ro'yxatdan o'tish → Modul sozlash → To'lov → 25 kunlik marafon</p>
-      <div class="row" id="stateBadges"></div>
-      <p id="statusMsg" class="muted"></p>
+<div class="wrap">
+  <div class="card">
+    <h1 class="title">🔥 Intizomli Erkak</h1>
+    <p class="sub">Ro'yxatdan o'tish → Modul sozlash → To'lov → 25 kunlik marafon</p>
+    <div id="stateBadges" class="row"></div>
+    <p id="statusMsg" class="muted"></p>
+    <p id="errorMsg" class="err"></p>
+  </div>
+
+  <div id="profileCard" class="card hidden">
+    <h3 class="section-title">👤 Profil</h3>
+    <div id="profileBody" class="list"></div>
+  </div>
+
+  <div id="regCard" class="card hidden">
+    <h3 class="section-title">1) Ro'yxatdan o'tish</h3>
+    <p class="muted">Barcha maydonlar majburiy.</p>
+    <div class="grid">
+      <input class="input" id="fullName" placeholder="Ism familiya" />
+      <input class="input" id="age" placeholder="Yosh (9..80)" />
+      <input class="input" id="location" placeholder="Qayerdanligi" />
+      <textarea class="textarea" id="goal" placeholder="Marafonga qatnashish maqsadi"></textarea>
+      <textarea class="textarea" id="pains" placeholder="Og'riqlar va muammolar"></textarea>
+      <textarea class="textarea" id="expectations" placeholder="Marafondan kutilmalar"></textarea>
+    </div>
+    <div style="margin-top:10px"><button class="btn primary" id="saveReg">Saqlash</button></div>
+  </div>
+
+  <div id="setupCard" class="card hidden">
+    <h3 class="section-title">2) Modullarni sozlash</h3>
+
+    <div id="moduleStepHabits" class="item">
+      <h4>2.1 Odatlar</h4>
+      <p class="muted">25 kun davomida 3-6 ta odat tanlang. Har odat uchun kunlarni belgilang.</p>
+      <div class="row">
+        <select id="habitTemplate" class="input"></select>
+        <button class="btn" id="addHabitTemplate">Shablondan qo'shish</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="habitCustomName" class="input" placeholder="Yangi odat nomi" />
+        <button class="btn" id="addHabitCustom">Odat qo'shish</button>
+      </div>
+      <div id="habitList" class="list" style="margin-top:8px"></div>
+      <p class="muted">Har odatda: Daily yoki hafta kunlari.</p>
     </div>
 
-    <div id="regCard" class="card hidden">
-      <h3>1) Ro'yxatdan o'tish</h3>
+    <div id="moduleStepSports" class="item" style="margin-top:10px">
+      <h4>2.2 Sport</h4>
+      <p class="muted">1-3 ta sport turi. Kunlar va miqdor kiriting (masalan 100 marta).</p>
+      <div class="row">
+        <select id="sportTemplate" class="input"></select>
+        <button class="btn" id="addSportTemplate">Shablondan qo'shish</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="sportCustomName" class="input" placeholder="Yangi sport nomi" />
+        <button class="btn" id="addSportCustom">Sport qo'shish</button>
+      </div>
+      <div id="sportList" class="list" style="margin-top:8px"></div>
+    </div>
+
+    <div id="moduleStepReading" class="item" style="margin-top:10px">
+      <h4>2.3 Mutolaa</h4>
+      <p class="muted">Default kitob: Intizom kuchi. Istasangiz boshqa kitob kiriting.</p>
       <div class="grid">
-        <input class="input" id="fullName" placeholder="Ism familiya" />
-        <input class="input" id="age" type="number" placeholder="Yosh" />
-        <input class="input" id="location" placeholder="Qayerdanligi" />
-        <textarea class="textarea" id="goal" placeholder="Marafonga qatnashish maqsadi"></textarea>
-        <textarea class="textarea" id="pains" placeholder="Og'riqlar va muammolar"></textarea>
-        <textarea class="textarea" id="expectations" placeholder="Marafondan kutilmalar"></textarea>
+        <input id="readingBook" class="input" placeholder="Kitob nomi" />
+        <input id="readingPages" class="input" placeholder="Kunlik sahifa (masalan 30)" />
       </div>
-      <div style="margin-top:10px"><button class="btn primary" id="saveReg">Saqlash</button></div>
     </div>
 
-    <div id="setupCard" class="card hidden">
-      <h3>2) Modullarni sozlash</h3>
-      <p class="muted">Tanlangan modullarga qarab kuniga 3 mahal eslatma yuboriladi.</p>
-      <div class="list" id="moduleList"></div>
-      <div class="grid" style="margin-top:10px">
-        <textarea class="textarea" id="habitsInput" placeholder="Odatlar (3-6 ta), vergul bilan"></textarea>
-        <textarea class="textarea" id="sportsInput" placeholder="Sport (1-3 ta), vergul bilan"></textarea>
-        <input class="input" id="bookInput" placeholder="Mutolaa kitobi" />
-        <input class="input" id="readingTaskInput" placeholder="Mutolaa vazifasi (masalan 30-50 bet)" />
-        <input class="input" id="remindersInput" placeholder="Eslatma soatlari (masalan 9,14,21)" />
-      </div>
-      <p class="muted" id="templateHints"></p>
+    <div class="item" style="margin-top:10px">
+      <h4>Eslatma soatlari</h4>
+      <p class="muted">Kuniga 3 mahal: tong, kun yarmi, tun.</p>
+      <input id="remindersInput" class="input" placeholder="9,14,21" />
+    </div>
+
+    <div style="margin-top:10px">
       <button class="btn primary" id="saveSetup">Sozlamalarni saqlash</button>
-    </div>
-
-    <div id="paymentCard" class="card hidden">
-      <h3>3) To'lov</h3>
-      <p class="muted">To'lov: <b>89 000 so'm</b>. Adminga to'lov qilasiz, admin sizga maxsus kod beradi.</p>
-      <div class="row">
-        <button class="btn warn" id="requestPayment">Adminga o'tish</button>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <input class="input" id="activationCode" placeholder="Maxsus kodni kiriting" />
-        <button class="btn primary" id="verifyCode">Kodni tasdiqlash</button>
-      </div>
-      <p class="muted" id="paymentMsg"></p>
-    </div>
-
-    <div id="dailyCard" class="card hidden">
-      <h3>📅 Kunlik Hisobot</h3>
-      <p class="muted" id="dayText"></p>
-      <div id="dailyPlan" class="list"></div>
-      <div style="margin-top:10px"><button class="btn ok" id="sendDaily">Hisobot yuborish</button></div>
-      <p class="muted" id="dailyMsg"></p>
-    </div>
-
-    <div id="challengeCard" class="card hidden">
-      <h3>🎲 Qiyinchilik (5-kundan ochiladi)</h3>
-      <div class="row">
-        <input class="input" id="challengeNums" placeholder="3 ta raqam: masalan 3, 12, 25" />
-        <button class="btn primary" id="pickChallenge">Tanlash</button>
-      </div>
-      <p class="muted" id="challengeMsg"></p>
-    </div>
-
-    <div id="progressCard" class="card hidden">
-      <h3>📊 Intizom Doskasi</h3>
-      <div id="moduleProgress" class="list"></div>
-      <div style="height:8px"></div>
-      <table>
-        <thead><tr><th>Sana</th><th>Modul</th><th>Bajarildi</th><th>Foiz</th></tr></thead>
-        <tbody id="progressTable"></tbody>
-      </table>
     </div>
   </div>
 
+  <div id="paymentCard" class="card hidden">
+    <h3 class="section-title">3) To'lov</h3>
+    <p class="muted">To'lov: <b>89 000 so'm</b>. Adminga to'lov qiling, maxsus kodni kiriting.</p>
+    <div class="row">
+      <button class="btn warn" id="requestPayment">Adminga o'tish</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input class="input" id="activationCode" placeholder="Maxsus kod" />
+      <button class="btn primary" id="verifyCode">Kodni tasdiqlash</button>
+    </div>
+    <p id="paymentMsg" class="muted"></p>
+  </div>
+
+  <div id="dailyCard" class="card hidden">
+    <h3 class="section-title">📅 Bugungi hisobot</h3>
+    <p id="dayText" class="muted"></p>
+    <div id="dailyPlan" class="list"></div>
+    <div style="margin-top:10px"><button class="btn ok" id="sendDaily">Hisobot yuborish</button></div>
+    <p id="dailyMsg" class="muted"></p>
+  </div>
+
+  <div id="progressCard" class="card hidden">
+    <h3 class="section-title">📊 Progress</h3>
+    <div id="moduleProgress" class="list"></div>
+    <table style="margin-top:8px">
+      <thead><tr><th>Sana</th><th>Modul</th><th>Bajarildi</th><th>Foiz</th></tr></thead>
+      <tbody id="progressTable"></tbody>
+    </table>
+  </div>
+</div>
+
 <script>
 const tg = window.Telegram?.WebApp;
-const API = new URLSearchParams(window.location.search).get("api") || "https://intizomli-api.onrender.com";
+const API = new URLSearchParams(window.location.search).get("api") || "https://intizomli-api-production.up.railway.app";
 const tgUser = tg?.initDataUnsafe?.user;
 const TG_ID = tgUser?.id;
 let STATE = null;
 let TEMPLATES = null;
 let PAYMENT_META = null;
 
+let habitPlans = [];
+let sportPlans = [];
+let weekdays = [
+  {key:'mon',label:'Du'}, {key:'tue',label:'Se'}, {key:'wed',label:'Cho'},
+  {key:'thu',label:'Pa'}, {key:'fri',label:'Ju'}, {key:'sat',label:'Sha'}, {key:'sun',label:'Ya'}
+];
+
 if (tg) { tg.ready(); tg.expand(); }
 
 const qs = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
-  const res = await fetch(API + path, {
-    headers: {"Content-Type":"application/json"},
-    ...options,
-  });
+  const res = await fetch(API + path, { headers: {"Content-Type":"application/json"}, ...options });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || (`HTTP ${res.status}`));
+    throw new Error(text || `HTTP ${res.status}`);
   }
   return res.json();
 }
 
-function parseCsv(v){ return v.split(",").map(x => x.trim()).filter(Boolean); }
-
 function show(id, yes){ qs(id).classList.toggle("hidden", !yes); }
+function red(msg){ qs('errorMsg').textContent = msg || ''; }
+function setStatus(msg){ qs('statusMsg').textContent = msg || ''; }
 
-function renderState() {
-  const badges = [];
-  badges.push(`ID: ${TG_ID || "-"}`);
-  badges.push(`To'lov: ${STATE.payment_status}`);
-  badges.push(`Kun: ${STATE.marathon_day}/${STATE.marathon_days}`);
-  badges.push(`Reyting: ${STATE.rating_points || 0}`);
-  qs("stateBadges").innerHTML = badges.map(x => `<div class="badge">${x}</div>`).join("");
-
-  show("regCard", !STATE.registration_completed);
-  show("setupCard", STATE.registration_completed && !STATE.setup_completed);
-  show("paymentCard", STATE.registration_completed && STATE.setup_completed && STATE.payment_status !== "paid");
-  show("dailyCard", STATE.is_active);
-  show("progressCard", STATE.is_active);
-
-  const challengeAllowed = STATE.is_active && STATE.modules?.includes("challenge") && STATE.marathon_day >= 5;
-  show("challengeCard", challengeAllowed);
-
-  qs("statusMsg").textContent = STATE.is_active
-    ? "Marafon aktiv. Har kuni checkbox hisobot yuboring."
-    : "Marafon aktiv emas. Bosqichlarni ketma-ket yakunlang.";
+function parseCsvHours(v){
+  const parts = String(v || '').split(',').map(x => Number(x.trim())).filter(x => Number.isInteger(x) && x >= 0 && x <= 23);
+  return [...new Set(parts)].slice(0, 3);
 }
 
-function renderSetupTemplates(){
+function fieldValidationError(){
+  const fullName = qs('fullName').value.trim();
+  const ageRaw = qs('age').value.trim();
+  const location = qs('location').value.trim();
+  const goal = qs('goal').value.trim();
+  const pains = qs('pains').value.trim();
+  const expectations = qs('expectations').value.trim();
+
+  if (!fullName || fullName.length < 3) return "Iltimos, 'Ism familiya' bo'limini to'g'ri to'ldiring.";
+  if (!ageRaw || !/^\d+$/.test(ageRaw)) return "Iltimos, 'Yosh' bo'limini raqamda to'g'ri kiriting.";
+  const age = Number(ageRaw);
+  if (age < 9 || age > 80) return "Iltimos, 'Yosh' bo'limini to'g'ri to'ldiring (9..80).";
+  if (!location || location.length < 2) return "Iltimos, 'Qayerdanligi' bo'limini to'g'ri to'ldiring.";
+  if (!goal || goal.length < 5) return "Iltimos, 'Maqsad' bo'limini to'g'ri to'ldiring.";
+  if (!pains || pains.length < 5) return "Iltimos, 'Og\'riqlar va muammolar' bo'limini to'g'ri to'ldiring.";
+  if (!expectations || expectations.length < 5) return "Iltimos, 'Kutilmalar' bo'limini to'g'ri to'ldiring.";
+  return null;
+}
+
+function renderState(){
+  const badges = [
+    `ID: ${TG_ID || '-'}`,
+    `To'lov: ${STATE.payment_status}`,
+    `Kun: ${STATE.marathon_day}/${STATE.marathon_days}`,
+    `Reyting: ${STATE.rating_points || 0}`,
+  ];
+  qs('stateBadges').innerHTML = badges.map(x => `<div class="badge">${x}</div>`).join('');
+
+  show('profileCard', true);
+  show('regCard', !STATE.registration_completed);
+  show('setupCard', STATE.registration_completed && !STATE.setup_completed);
+  show('paymentCard', STATE.registration_completed && STATE.setup_completed && STATE.payment_status !== 'paid');
+  show('dailyCard', STATE.is_active);
+  show('progressCard', true);
+
+  setStatus(STATE.is_active
+    ? "Marafon aktiv. Hisobot faqat bugungi kun uchun yuboriladi."
+    : "Marafon aktiv emas. Bosqichlarni ketma-ket yakunlang.");
+}
+
+function renderProfile(){
+  const rows = [
+    [`Ism`, STATE.full_name || '-'],
+    [`Yosh`, STATE.age ?? '-'],
+    [`Hudud`, STATE.location || '-'],
+    [`Maqsad`, STATE.goal || '-'],
+    [`Og'riqlar`, STATE.pains || '-'],
+    [`Kutilmalar`, STATE.expectations || '-'],
+  ];
+  qs('profileBody').innerHTML = rows.map(r => `<div class="item"><b>${r[0]}:</b><div class="muted">${r[1]}</div></div>`).join('');
+}
+
+function dayChips(selectedDays = ['daily']){
+  const chips = [`<span class="chip ${selectedDays.includes('daily') ? 'active': ''}" data-day="daily">Har kuni</span>`];
+  weekdays.forEach(d => chips.push(`<span class="chip ${selectedDays.includes(d.key) ? 'active': ''}" data-day="${d.key}">${d.label}</span>`));
+  return `<div class="chips">${chips.join('')}</div>`;
+}
+
+function renderHabitList(){
+  qs('habitList').innerHTML = habitPlans.map((h, i) => `
+    <div class="item" data-kind="habit" data-idx="${i}">
+      <div class="row" style="justify-content:space-between"><b>${h.name}</b><button class="btn" data-action="remove-habit" data-idx="${i}">O'chirish</button></div>
+      ${dayChips(h.days)}
+    </div>`).join('') || `<p class="muted">Hali odat qo'shilmagan.</p>`;
+}
+
+function renderSportList(){
+  qs('sportList').innerHTML = sportPlans.map((s, i) => `
+    <div class="item" data-kind="sport" data-idx="${i}">
+      <div class="row" style="justify-content:space-between"><b>${s.name}</b><button class="btn" data-action="remove-sport" data-idx="${i}">O'chirish</button></div>
+      ${dayChips(s.days)}
+      <div style="margin-top:8px"><input class="input" data-action="sport-target" data-idx="${i}" value="${s.target_count || ''}" placeholder="Miqdor (masalan 100)" /></div>
+    </div>`).join('') || `<p class="muted">Hali sport qo'shilmagan.</p>`;
+}
+
+function fillTemplates(){
   if (!TEMPLATES) return;
-  qs("moduleList").innerHTML = TEMPLATES.modules.map(m => `<label class="item"><input type="checkbox" value="${m}" /> ${m}</label>`).join("");
-  qs("templateHints").textContent = `Odatlar shabloni: ${TEMPLATES.habits.join(", ")} | Sport shabloni: ${TEMPLATES.sports.join(", ")}`;
-  qs("habitsInput").value = TEMPLATES.habits.slice(0,3).join(", ");
-  qs("sportsInput").value = TEMPLATES.sports.slice(0,2).join(", ");
-  qs("remindersInput").value = "9,14,21";
+  weekdays = TEMPLATES.weekdays || weekdays;
+
+  const hSel = qs('habitTemplate');
+  hSel.innerHTML = (TEMPLATES.habits || []).map(x => `<option>${x}</option>`).join('');
+  const sSel = qs('sportTemplate');
+  sSel.innerHTML = (TEMPLATES.sports || []).map(x => `<option>${x}</option>`).join('');
+
+  if (!habitPlans.length) {
+    habitPlans = (TEMPLATES.habits || []).slice(0, 3).map(x => ({name: x, days: ['daily']}));
+  }
+  if (!sportPlans.length) {
+    sportPlans = (TEMPLATES.sports || []).slice(0, 1).map(x => ({name: x, days: ['daily'], target_count: null}));
+  }
+
+  qs('readingBook').value = STATE?.reading_book || TEMPLATES.default_book || 'Intizom kuchi';
+  qs('readingPages').value = STATE?.reading_pages_per_day || 30;
+  qs('remindersInput').value = (STATE?.reminder_hours || [9,14,21]).join(',');
+
+  renderHabitList();
+  renderSportList();
 }
 
-function checkedModules(){
-  return [...qs("moduleList").querySelectorAll("input[type='checkbox']")].filter(x=>x.checked).map(x=>x.value);
+function setupValidationError(){
+  if (habitPlans.length < 3 || habitPlans.length > 6) return "Odatlar soni 3 tadan 6 tagacha bo'lishi kerak.";
+  if (sportPlans.length < 1 || sportPlans.length > 3) return "Sportlar soni 1 tadan 3 tagacha bo'lishi kerak.";
+  const readingBook = qs('readingBook').value.trim();
+  const pages = Number(qs('readingPages').value.trim());
+  if (!readingBook) return "Mutolaa bo'limida kitob nomini kiriting.";
+  if (!Number.isInteger(pages) || pages < 1 || pages > 300) return "Mutolaa sahifasi 1 dan 300 gacha bo'lishi kerak.";
+  const hrs = parseCsvHours(qs('remindersInput').value);
+  if (hrs.length !== 3) return "Eslatma soatlarini 3 ta kiriting (masalan 9,14,21).";
+  return null;
+}
+
+function toggleDays(target, plans){
+  const idx = Number(target.closest('[data-idx]').dataset.idx);
+  const day = target.dataset.day;
+  const item = plans[idx];
+  if (!item) return;
+  if (day === 'daily') {
+    item.days = ['daily'];
+  } else {
+    item.days = (item.days || []).filter(d => d !== 'daily');
+    if (item.days.includes(day)) item.days = item.days.filter(d => d !== day);
+    else item.days.push(day);
+    if (!item.days.length) item.days = ['daily'];
+  }
 }
 
 async function loadDaily(){
   const d = await api(`/v1/app/daily/${TG_ID}`);
-  qs("dayText").textContent = `${d.report_date} | ${d.day}-kun`;
+  qs('dayText').textContent = `${d.report_date} | ${d.day}-kun`;
 
   const blocks = [];
   Object.entries(d.plan || {}).forEach(([module, items]) => {
-    blocks.push(`<div class="pill"><b>${module.toUpperCase()}</b></div>`);
+    if (!items.length) return;
+    blocks.push(`<div class="item"><b>${module.toUpperCase()}</b></div>`);
     items.forEach(item => {
       const key = `${module}:${item}`;
-      const checked = d.checked?.[key] ? "checked" : "";
+      const checked = d.checked?.[key] ? 'checked' : '';
       blocks.push(`<label class="item"><input type="checkbox" data-module="${module}" data-item="${item}" ${checked}/> ${item}</label>`);
     });
   });
-  qs("dailyPlan").innerHTML = blocks.join("") || "Bugungi plan yo'q";
+  qs('dailyPlan').innerHTML = blocks.join('') || `<p class='muted'>Bugun vazifa yo'q.</p>`;
 }
 
 async function loadProgress(){
   const p = await api(`/v1/app/progress/${TG_ID}`);
   const mp = p.module_percent || {};
-  qs("moduleProgress").innerHTML = Object.keys(mp).map(m => `
+  qs('moduleProgress').innerHTML = Object.keys(mp).map(m => `
     <div>
       <div class="row" style="justify-content:space-between"><span>${m}</span><span>${mp[m]}%</span></div>
       <div class="progress"><div style="width:${mp[m]}%"></div></div>
-    </div>`).join("") || "Hali progress yo'q";
-
-  qs("progressTable").innerHTML = (p.table || []).map(r => `<tr><td>${r.date}</td><td>${r.module}</td><td>${r.done}/${r.total}</td><td>${r.percent}%</td></tr>`).join("");
+    </div>`).join('') || `<p class='muted'>Hali progress yo'q.</p>`;
+  qs('progressTable').innerHTML = (p.table || []).map(r => `<tr><td>${r.date}</td><td>${r.module}</td><td>${r.done}/${r.total}</td><td>${r.percent}%</td></tr>`).join('');
 }
 
 async function bootstrap(){
   if (!TG_ID) {
-    qs("statusMsg").textContent = `Telegram ichida oching. API: ${API}`;
+    setStatus(`Telegram ichida oching. API: ${API}`);
     return;
   }
-  const b = await api("/v1/app/bootstrap", {
-    method: "POST",
-    body: JSON.stringify({
-      tg_user_id: TG_ID,
-      username: tgUser?.username || null,
-      first_name: tgUser?.first_name || null
-    })
+  const b = await api('/v1/app/bootstrap', {
+    method: 'POST',
+    body: JSON.stringify({tg_user_id: TG_ID, username: tgUser?.username || null, first_name: tgUser?.first_name || null}),
   });
   TEMPLATES = b.templates;
   PAYMENT_META = b.payment || {};
 
   STATE = await api(`/v1/app/state/${TG_ID}`);
-  renderSetupTemplates();
+  if (Array.isArray(STATE.habits) && STATE.habits.length) habitPlans = STATE.habits;
+  if (Array.isArray(STATE.sports) && STATE.sports.length) sportPlans = STATE.sports;
+
   renderState();
+  renderProfile();
+  fillTemplates();
 
   if (STATE.is_active) {
     await loadDaily();
-    await loadProgress();
   }
+  await loadProgress();
 }
 
-function showError(prefix, error){
-  const msg = (error && error.message) ? error.message : String(error || "Noma'lum xato");
-  qs("statusMsg").textContent = `${prefix}: ${msg}`;
-  console.error(prefix, error);
-}
-
-qs("saveReg").addEventListener("click", async () => {
+// Registration
+qs('saveReg').addEventListener('click', async () => {
+  red('');
+  const err = fieldValidationError();
+  if (err) { red(err); return; }
   try {
-    await api("/v1/app/register", {
-      method: "POST",
+    await api('/v1/app/register', {
+      method: 'POST',
       body: JSON.stringify({
         tg_user_id: TG_ID,
-        full_name: qs("fullName").value,
-        age: Number(qs("age").value),
-        location: qs("location").value,
-        goal: qs("goal").value,
-        pains: qs("pains").value,
-        expectations: qs("expectations").value,
-      })
+        full_name: qs('fullName').value.trim(),
+        age: Number(qs('age').value.trim()),
+        location: qs('location').value.trim(),
+        goal: qs('goal').value.trim(),
+        pains: qs('pains').value.trim(),
+        expectations: qs('expectations').value.trim(),
+      }),
     });
-    await bootstrap();
-  } catch (e) { showError("Ro'yxatdan o'tishda xato", e); }
-});
-
-qs("saveSetup").addEventListener("click", async () => {
-  try {
-    await api("/v1/app/setup", {
-      method: "POST",
-      body: JSON.stringify({
-        tg_user_id: TG_ID,
-        modules: checkedModules(),
-        habits: parseCsv(qs("habitsInput").value),
-        sports: parseCsv(qs("sportsInput").value),
-        reading_book: qs("bookInput").value,
-        reading_task: qs("readingTaskInput").value,
-        reminder_hours: parseCsv(qs("remindersInput").value).map(Number),
-      })
-    });
-    await bootstrap();
-  } catch (e) { showError("Modul sozlashda xato", e); }
-});
-
-qs("requestPayment").addEventListener("click", async () => {
-  try {
-    const r = await api("/v1/app/payment/request", { method:"POST", body: JSON.stringify({tg_user_id: TG_ID}) });
-    qs("paymentMsg").textContent = r.note || "To'lov kutilmoqda.";
-    const adminUrl = r.admin_url || PAYMENT_META?.admin_url;
-    if (adminUrl) {
-      if (tg && tg.openTelegramLink) tg.openTelegramLink(adminUrl);
-      else if (tg && tg.openLink) tg.openLink(adminUrl);
-      else window.open(adminUrl, "_blank");
-    }
-    await bootstrap();
-  } catch (e) { showError("To'lov so'rovida xato", e); }
-});
-
-qs("verifyCode").addEventListener("click", async () => {
-  const code = qs("activationCode").value.trim();
-  if (!code) {
-    qs("paymentMsg").textContent = "Kod kiriting.";
-    return;
-  }
-  try {
-    const r = await api("/v1/app/payment/verify-code", {
-      method: "POST",
-      body: JSON.stringify({ tg_user_id: TG_ID, code })
-    });
-    qs("paymentMsg").textContent = r.marathon_started ? "✅ Marafon ochildi." : "Kod tasdiqlandi.";
     await bootstrap();
   } catch (e) {
-    showError("Kod tasdiqlashda xato", e);
+    red((e.message || '').replace(/^\{"detail":"|"\}$/g, '') || "Ro'yxatdan o'tishda xato");
   }
 });
 
-qs("sendDaily").addEventListener("click", async () => {
+// Habits/Sports add
+qs('addHabitTemplate').addEventListener('click', () => {
+  const name = qs('habitTemplate').value.trim();
+  if (!name) return;
+  if (!habitPlans.find(x => x.name.toLowerCase() === name.toLowerCase())) habitPlans.push({name, days: ['daily']});
+  renderHabitList();
+});
+qs('addHabitCustom').addEventListener('click', () => {
+  const name = qs('habitCustomName').value.trim();
+  if (!name) return;
+  if (!habitPlans.find(x => x.name.toLowerCase() === name.toLowerCase())) habitPlans.push({name, days: ['daily']});
+  qs('habitCustomName').value = '';
+  renderHabitList();
+});
+qs('addSportTemplate').addEventListener('click', () => {
+  const name = qs('sportTemplate').value.trim();
+  if (!name) return;
+  if (!sportPlans.find(x => x.name.toLowerCase() === name.toLowerCase())) sportPlans.push({name, days: ['daily'], target_count: null});
+  renderSportList();
+});
+qs('addSportCustom').addEventListener('click', () => {
+  const name = qs('sportCustomName').value.trim();
+  if (!name) return;
+  if (!sportPlans.find(x => x.name.toLowerCase() === name.toLowerCase())) sportPlans.push({name, days: ['daily'], target_count: null});
+  qs('sportCustomName').value = '';
+  renderSportList();
+});
+
+qs('setupCard').addEventListener('click', (e) => {
+  const t = e.target;
+  if (t.dataset.action === 'remove-habit') {
+    habitPlans.splice(Number(t.dataset.idx), 1);
+    renderHabitList();
+    return;
+  }
+  if (t.dataset.action === 'remove-sport') {
+    sportPlans.splice(Number(t.dataset.idx), 1);
+    renderSportList();
+    return;
+  }
+  if (t.classList.contains('chip') && t.closest('[data-kind="habit"]')) {
+    toggleDays(t, habitPlans); renderHabitList(); return;
+  }
+  if (t.classList.contains('chip') && t.closest('[data-kind="sport"]')) {
+    toggleDays(t, sportPlans); renderSportList(); return;
+  }
+});
+
+qs('setupCard').addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.dataset.action === 'sport-target') {
+    const idx = Number(t.dataset.idx);
+    const v = Number(t.value);
+    sportPlans[idx].target_count = Number.isInteger(v) && v > 0 ? v : null;
+  }
+});
+
+qs('saveSetup').addEventListener('click', async () => {
+  red('');
+  const err = setupValidationError();
+  if (err) { red(err); return; }
+
+  try {
+    await api('/v1/app/setup', {
+      method: 'POST',
+      body: JSON.stringify({
+        tg_user_id: TG_ID,
+        modules: ['habits', 'sports', 'reading'],
+        setup: {
+          habits: habitPlans,
+          sports: sportPlans,
+          reading: { book: qs('readingBook').value.trim(), pages_per_day: Number(qs('readingPages').value.trim()) },
+        },
+        reminder_hours: parseCsvHours(qs('remindersInput').value),
+      }),
+    });
+    await bootstrap();
+  } catch (e) {
+    red((e.message || '').replace(/^\{"detail":"|"\}$/g, '') || "Modul sozlashda xato");
+  }
+});
+
+// Payment
+qs('requestPayment').addEventListener('click', async () => {
+  red('');
+  try {
+    const r = await api('/v1/app/payment/request', { method: 'POST', body: JSON.stringify({tg_user_id: TG_ID}) });
+    qs('paymentMsg').textContent = r.note || "To'lov kutilmoqda.";
+    const adminUrl = r.admin_url || PAYMENT_META?.admin_url;
+    const deep = r.admin_tg_deep_link;
+    if (adminUrl) {
+      if (tg?.openTelegramLink) tg.openTelegramLink(adminUrl);
+      else if (tg?.openLink) tg.openLink(adminUrl);
+      else window.open(adminUrl, '_blank');
+    } else if (deep) {
+      if (tg?.openLink) tg.openLink(deep);
+      else window.location.href = deep;
+    }
+    await bootstrap();
+  } catch (e) {
+    red((e.message || '').replace(/^\{"detail":"|"\}$/g, '') || "To'lov bo'limida xato");
+  }
+});
+
+qs('verifyCode').addEventListener('click', async () => {
+  red('');
+  try {
+    const code = qs('activationCode').value.trim();
+    if (!code) { red("Avval maxsus kodni kiriting."); return; }
+    const r = await api('/v1/app/payment/verify-code', {
+      method: 'POST',
+      body: JSON.stringify({tg_user_id: TG_ID, code}),
+    });
+    qs('paymentMsg').textContent = r.marathon_started ? "✅ Marafon ochildi." : "Kod tasdiqlandi.";
+    await bootstrap();
+  } catch (e) {
+    red((e.message || '').replace(/^\{"detail":"|"\}$/g, '') || "Kod tekshirishda xato");
+  }
+});
+
+qs('sendDaily').addEventListener('click', async () => {
+  red('');
   const checked = {};
-  [...qs("dailyPlan").querySelectorAll("input[type='checkbox']")].forEach(ch => {
+  [...qs('dailyPlan').querySelectorAll("input[type='checkbox']")].forEach(ch => {
     if (!ch.checked) return;
     const m = ch.dataset.module;
     if (!checked[m]) checked[m] = [];
     checked[m].push(ch.dataset.item);
   });
+
   try {
-    const r = await api("/v1/app/daily/report", { method:"POST", body: JSON.stringify({tg_user_id: TG_ID, checked}) });
-    qs("dailyMsg").textContent = `Hisobot saqlandi: ${r.percent}%`;
-    if (tg) tg.sendData(JSON.stringify({ type: "daily_report_submitted", percent: r.percent }));
+    const r = await api('/v1/app/daily/report', { method: 'POST', body: JSON.stringify({tg_user_id: TG_ID, checked}) });
+    qs('dailyMsg').textContent = `Hisobot saqlandi: ${r.percent}%`;
+    if (tg) tg.sendData(JSON.stringify({type:'daily_report_submitted', percent:r.percent}));
     await loadProgress();
-  } catch (e) { showError("Hisobot yuborishda xato", e); }
+  } catch (e) {
+    red((e.message || '').replace(/^\{"detail":"|"\}$/g, '') || "Hisobot yuborishda xato");
+  }
 });
 
-qs("pickChallenge").addEventListener("click", async () => {
-  const nums = parseCsv(qs("challengeNums").value).map(Number);
-  try {
-    const r = await api("/v1/app/challenge/pick", { method:"POST", body: JSON.stringify({tg_user_id: TG_ID, numbers: nums}) });
-    qs("challengeMsg").textContent = `Vazifalar: ${r.tasks.join(" | ")} | Muddat: ${r.deadline}`;
-    await loadDaily();
-  } catch (e) { showError("Challenge tanlashda xato", e); }
-});
-
-window.addEventListener("error", (event) => {
-  showError("Frontend xatosi", event.error || event.message);
-});
-
-bootstrap().catch((e) => showError("Yuklashda xato", e));
+window.addEventListener('error', (event) => red(`Frontend xatosi: ${event.message || 'Noma\'lum'}`));
+bootstrap().catch((e) => red(`Yuklashda xato: ${e.message || 'Load failed'}`));
 </script>
 </body>
 </html>

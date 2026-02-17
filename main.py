@@ -68,6 +68,15 @@ def _gen_code(length: int = 8) -> str:
     return "".join(random.choice(chars) for _ in range(length))
 
 
+def _reminder_slot(hour: int) -> str:
+    hours = sorted(REMINDER_HOURS[:3]) if REMINDER_HOURS else [9, 14, 21]
+    if hour == hours[0]:
+        return "morning"
+    if len(hours) > 1 and hour == hours[1]:
+        return "midday"
+    return "night"
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tg_user = update.effective_user
     ref_code = context.args[0] if context.args else ""
@@ -193,8 +202,48 @@ async def create_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+async def create_codes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        await update.message.reply_text("❌ Siz admin emassiz.")
+        return
+
+    count = 200
+    if context.args:
+        try:
+            count = int(context.args[0])
+        except Exception:
+            await update.message.reply_text("Foydalanish: /codes <count>")
+            return
+    if count < 1 or count > 500:
+        await update.message.reply_text("Count 1..500 oralig'ida bo'lsin.")
+        return
+
+    created: List[str] = []
+    with SessionLocal() as db:
+        for _ in range(count):
+            code = _gen_code()
+            while db.scalar(select(ActivationCode).where(ActivationCode.code == code)):
+                code = _gen_code()
+            db.add(
+                ActivationCode(
+                    code=code,
+                    target_tg_user_id=None,
+                    created_by_tg_user_id=user_id,
+                    is_used=False,
+                )
+            )
+            created.append(code)
+        db.commit()
+
+    text = "✅ Maxsus kodlar yaratildi:\n\n" + "\n".join(created)
+    for i in range(0, len(text), 3900):
+        await update.message.reply_text(text[i : i + 3900])
+
+
 async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     hour = context.job.data.get("hour") if context.job else None
+    slot = _reminder_slot(int(hour)) if hour is not None else "midday"
     with SessionLocal() as db:
         users = get_reportable_users(db)
 
@@ -202,12 +251,22 @@ async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         modules = _user_modules(user)
         if not modules:
             continue
-        msg = (
-            "⏰ *Eslatma*\n\n"
-            f"Hozirgi slot: *{hour}:00*\n"
-            f"Bugungi modullar: {', '.join(modules)}\n"
-            "Mini App orqali checkbox bilan hisobot yuboring."
-        )
+        if slot == "morning":
+            msg = (
+                "🌅 *Tonggi eslatma*\n\n"
+                "Yangi kun boshlandi. Bugungi odatlar, sport va mutolaani bajarishni boshlang."
+            )
+        elif slot == "midday":
+            msg = (
+                "🕑 *Kun yarmidagi eslatma*\n\n"
+                "Rejadan ortda qolmang, bugungi vazifalarni davom ettiring."
+            )
+        else:
+            msg = (
+                "🌙 *Tungi eslatma*\n\n"
+                "Kun yakunlandi. Mini App'da bugungi hisobotni yuborishni unutmang."
+            )
+        msg = msg + f"\n\nBugungi modullar: {', '.join(modules)}"
         try:
             await context.bot.send_message(
                 chat_id=user.tg_user_id,
@@ -229,6 +288,7 @@ def run() -> None:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("code", create_code))
+    app.add_handler(CommandHandler("codes", create_codes))
     app.add_handler(CallbackQueryHandler(on_menu, pattern=r"^menu:"))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, on_webapp_data))
 
