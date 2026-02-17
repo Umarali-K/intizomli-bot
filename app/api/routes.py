@@ -11,7 +11,6 @@ from sqlalchemy import Integer, and_, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.config import settings
 from app.crud import get_referral_count, upsert_user
 from app.models import ActivationCode, AuditLog, Challenge, DailyModuleReport, PaymentTransaction, User, UserAchievement
 
@@ -30,15 +29,74 @@ PAYME_KEY = os.getenv("PAYME_KEY", "").strip()
 ADMIN_CONTACT_USERNAME = os.getenv("ADMIN_CONTACT_USERNAME", "").strip().lstrip("@")
 PAYMENT_MODE = os.getenv("PAYMENT_MODE", "manual_code").strip().lower()
 
+MARATHON_GLOBAL_START_DATE = date(2026, 2, 20)
+
 HABIT_TEMPLATES = [
-    "Ertalab erta turish",
-    "Telefonsiz 1 soat",
-    "Kundalik reja yozish",
-    "Shikoyatsiz kun",
-    "Duo / tafakkur",
-    "Uyqudan oldin kun tahlili",
+    "Har kuni 06:00 da uyg'onish",
+    "Uyg'ongach 60 daqiqa telefon ochmaslik",
+    "Kun boshida 10 daqiqa reja yozish",
+    "Ertaroq uxlash",
+    "Har kuni 20 daqiqa yurish",
+    "Har kuni 30 ta otjimaniya",
+    "Kuniga 2 litr suv ichish",
+    "3 daqiqa sovuq dush qabul qilish",
+    "Har kuni 15 bet kitob o'qish",
+    "Har kuni o'qilgan kitob bo'yicha xulosa yozish",
+    "Haftada bir kun ijtimoiy tarmoqsiz kun",
+    "Ovqat paytida telefon ishlatmaslik",
+    "Har tongda 15 daqiqa badantarbiya",
+    "Har kuni 10-20 ta yangi so'z yodlash",
+    "Fast-food iste'mol qilmaslik",
+    "Har kuni ota-onaga hurmat va mehr ko'rsatish",
+    "Haftada bir marta ehson qilish",
+    "Instagramdan foydalanmaslik kuni",
+    "Kunni yaxshi niyat bilan boshlash",
+    "Har kuni istig'for aytish",
+    "Har kuni shukr qilish",
+    "Uyqudan oldin duoda bo'lish",
+    "Ota-ona haqiga duo qilish",
+    "Har kuni ota-onadan duo so'rash",
+    "Bemorlarni ziyorat qilish",
+    "Birinchi bo'lib salom berish",
+    "Qur'on tilovat qilish yoki tinglash",
+    "Doim tahoratli yurishga harakat qilish",
+    "Shakarli taomlarni kamaytirish",
+    "Kun yakunida o'zini tahlil qilish",
 ]
-SPORT_TEMPLATES = ["Yugurish", "Piyoda yurish", "Otjimaniya", "Turnik", "Press"]
+SPORT_TEMPLATES = [
+    "1 km yugurish",
+    "3 km yugurish",
+    "Tez yurish (30 daqiqa)",
+    "Arqon sakrash",
+    "Zinadan chiqish",
+    "Velosiped haydash",
+    "Suzish",
+    "Interval yugurish",
+    "Joyida yugurish",
+    "Kardio video mashqlar",
+    "Push-up (otjimaniya)",
+    "Squat (o'tirib-turish)",
+    "Plank (taxta holati)",
+    "Turnik tortilish",
+    "Brus mashqi",
+    "Wall-sit",
+    "Lunge",
+    "Dead hang",
+    "Burpee",
+    "Core mashqlar",
+    "Stretching",
+    "Yoga",
+    "Nafas mashqlari",
+    "Issiq-sovuq kontrast dush",
+    "Ertalabki gimnastika",
+    "Bo'yin va bel mashqlari",
+    "Mobilizatsiya mashqlari",
+    "Meditativ yurish",
+    "Press mashqlari",
+    "Qorin mashqlari",
+    "Bel uchun mashqlar",
+    "Qadam soni: 10 000+",
+]
 CHALLENGE_POOL = {
     1: "Sovuq dush",
     2: "3 km piyoda yurish",
@@ -121,6 +179,8 @@ def _get_user_or_404(db: Session, tg_user_id: int) -> User:
 def _marathon_day(user: User) -> int:
     if not user.marathon_start_date:
         return 0
+    if date.today() < user.marathon_start_date:
+        return 0
     return max(0, (date.today() - user.marathon_start_date).days + 1)
 
 
@@ -129,7 +189,11 @@ def _is_setup_completed(user: User) -> bool:
 
 
 def _is_active(user: User) -> bool:
-    return user.registration_completed and _is_setup_completed(user) and user.payment_status == "paid"
+    if not (user.registration_completed and _is_setup_completed(user) and user.payment_status == "paid"):
+        return False
+    if not user.marathon_start_date:
+        return False
+    return date.today() >= user.marathon_start_date
 
 
 def _level_from_points(points: int) -> Dict[str, Any]:
@@ -221,9 +285,9 @@ def _activate_user(user: User) -> None:
     user.payment_status = "paid"
     user.is_paid = True
     user.payment_confirmed_at = datetime.utcnow()
-    user.status = "active"
     if not user.marathon_start_date:
-        user.marathon_start_date = date.today()
+        user.marathon_start_date = MARATHON_GLOBAL_START_DATE
+    user.status = "active" if date.today() >= user.marathon_start_date else "scheduled"
 
 
 def _build_click_payment_url(user: User) -> Optional[str]:
@@ -421,6 +485,7 @@ def app_bootstrap(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dic
             "is_active": _is_active(user),
             "marathon_day": _marathon_day(user),
             "marathon_days": user.marathon_days,
+            "marathon_start_date": (user.marathon_start_date.isoformat() if user.marathon_start_date else MARATHON_GLOBAL_START_DATE.isoformat()),
             "referral_count": referral_count,
         },
     }
@@ -499,8 +564,8 @@ def app_setup(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dict[st
             if not name:
                 continue
             habits_plan.append({"name": name, "days": days})
-        if len(habits_plan) < 3 or len(habits_plan) > 6:
-            raise HTTPException(status_code=400, detail="Odatlar soni 3 tadan 6 tagacha bo'lishi kerak.")
+        if len(habits_plan) < 1:
+            raise HTTPException(status_code=400, detail="Kamida 1 ta odat kiriting.")
 
     sports_plan: List[Dict[str, Any]] = []
     if "sports" in modules:
@@ -522,8 +587,8 @@ def app_setup(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dict[st
             if not name:
                 continue
             sports_plan.append({"name": name, "days": days, "target_count": target})
-        if len(sports_plan) < 1 or len(sports_plan) > 3:
-            raise HTTPException(status_code=400, detail="Sportlar soni 1 tadan 3 tagacha bo'lishi kerak.")
+        if len(sports_plan) < 1:
+            raise HTTPException(status_code=400, detail="Kamida 1 ta sport kiriting.")
 
     reading_payload = raw_reading if isinstance(raw_reading, dict) else {}
     reading_book = str(
@@ -608,7 +673,12 @@ def payment_confirm(
     db.add(user)
     db.commit()
 
-    return {"ok": True, "payment_status": "paid", "marathon_started": True}
+    return {
+        "ok": True,
+        "payment_status": "paid",
+        "marathon_started": date.today() >= (user.marathon_start_date or MARATHON_GLOBAL_START_DATE),
+        "marathon_start_date": (user.marathon_start_date or MARATHON_GLOBAL_START_DATE).isoformat(),
+    }
 
 
 @router.post("/v1/app/payment/verify-code")
@@ -629,7 +699,13 @@ def payment_verify_code(payload: Dict[str, Any], db: Session = Depends(get_db)) 
         user.device_bound_at = datetime.utcnow()
 
     if user.payment_status == "paid":
-        return {"ok": True, "already_paid": True, "payment_status": "paid", "marathon_started": True}
+        return {
+            "ok": True,
+            "already_paid": True,
+            "payment_status": "paid",
+            "marathon_started": date.today() >= (user.marathon_start_date or MARATHON_GLOBAL_START_DATE),
+            "marathon_start_date": (user.marathon_start_date or MARATHON_GLOBAL_START_DATE).isoformat(),
+        }
 
     ac = db.scalar(select(ActivationCode).where(ActivationCode.code == code))
     if not ac:
@@ -655,7 +731,12 @@ def payment_verify_code(payload: Dict[str, Any], db: Session = Depends(get_db)) 
     db.add_all([ac, user])
     db.commit()
 
-    return {"ok": True, "payment_status": "paid", "marathon_started": True}
+    return {
+        "ok": True,
+        "payment_status": "paid",
+        "marathon_started": date.today() >= (user.marathon_start_date or MARATHON_GLOBAL_START_DATE),
+        "marathon_start_date": (user.marathon_start_date or MARATHON_GLOBAL_START_DATE).isoformat(),
+    }
 
 
 @router.post("/v1/app/payment/payme/merchant")
@@ -860,7 +941,12 @@ def payment_click_callback(
         db.add(user)
         db.commit()
 
-    return {"ok": True, "payment_status": "paid", "marathon_started": True}
+    return {
+        "ok": True,
+        "payment_status": "paid",
+        "marathon_started": date.today() >= (user.marathon_start_date or MARATHON_GLOBAL_START_DATE),
+        "marathon_start_date": (user.marathon_start_date or MARATHON_GLOBAL_START_DATE).isoformat(),
+    }
 
 
 @router.post("/v1/app/payment/click/merchant")
@@ -1052,6 +1138,7 @@ def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
         "level": level,
         "marathon_day": _marathon_day(user),
         "marathon_days": user.marathon_days,
+        "marathon_start_date": user.marathon_start_date.isoformat() if user.marathon_start_date else MARATHON_GLOBAL_START_DATE.isoformat(),
         "modules": modules,
         "habits": habits_raw,
         "sports": sports_raw,
@@ -1081,6 +1168,8 @@ def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
 def app_daily(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     user = _get_user_or_404(db, tg_user_id)
     if not _is_active(user):
+        if user.marathon_start_date and date.today() < user.marathon_start_date:
+            raise HTTPException(status_code=400, detail=f"Marafon {user.marathon_start_date.isoformat()} sanadan boshlanadi.")
         raise HTTPException(status_code=400, detail="marathon not active")
 
     plan = _daily_items_for_user(db, user)
@@ -1104,6 +1193,8 @@ def app_daily(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
 def app_daily_report(payload: Dict[str, Any], db: Session = Depends(get_db)) -> Dict[str, Any]:
     user = _get_user_or_404(db, int(payload.get("tg_user_id", 0)))
     if not _is_active(user):
+        if user.marathon_start_date and date.today() < user.marathon_start_date:
+            raise HTTPException(status_code=400, detail=f"Hisobot {user.marathon_start_date.isoformat()} dan qabul qilinadi.")
         raise HTTPException(status_code=400, detail="marathon not active")
 
     checked: Dict[str, List[str]] = payload.get("checked", {})

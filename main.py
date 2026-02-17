@@ -60,6 +60,12 @@ def main_menu() -> InlineKeyboardMarkup:
     )
 
 
+def intro_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✅ O'qib tanishib chiqdim", callback_data="intro:ok")]]
+    )
+
+
 def _user_modules(user) -> List[str]:
     if not user or not user.selected_modules_json:
         return []
@@ -110,14 +116,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             except ValueError:
                 pass
 
-    state = "aktiv ✅" if user.payment_status == "paid" else "to'lov kutilmoqda"
     await update.message.reply_text(
-        "🔥 *INTIZOMLI ERKAK*\n\n"
-        "Asosiy jarayon endi Mini App ichida: ro'yxatdan o'tish → modul sozlash → to'lov → marafon.\n\n"
-        f"Holat: *{state}*\n"
-        "Mini Appni oching 👇",
+        "🔥 *INTIZOMLI ERKAK MARAFONI*\n\n"
+        "Marafon maqsadi:\n"
+        "- Intizomli hayot ritmini shakllantirish\n"
+        "- Har kunlik hisobot orqali javobgarlikni oshirish\n\n"
+        "Modullar:\n"
+        "- Odatlar\n"
+        "- Sport\n"
+        "- Mutolaa\n\n"
+        "To'lov: *89 000 so'm*\n"
+        "Davomiylik: *25 kun*\n"
+        "Start sanasi: *2026-02-20*\n\n"
+        "Davom etishdan oldin tanishib chiqing.",
         parse_mode="Markdown",
-        reply_markup=main_menu(),
+        reply_markup=intro_menu(),
     )
 
 
@@ -168,6 +181,22 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text = "Mini Appni ochib davom eting."
 
     await q.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu())
+
+
+async def on_intro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    await q.answer()
+    with SessionLocal() as db:
+        user = upsert_user(db, q.from_user.id, q.from_user.username, q.from_user.first_name)
+    state = "aktiv ✅" if user.payment_status == "paid" else "to'lov kutilmoqda"
+    await q.edit_message_text(
+        "🔥 *INTIZOMLI ERKAK*\n\n"
+        "Asosiy jarayon endi Mini App ichida: ro'yxatdan o'tish → modul sozlash → to'lov → marafon.\n\n"
+        f"Holat: *{state}*\n"
+        "Mini Appni oching 👇",
+        parse_mode="Markdown",
+        reply_markup=main_menu(),
+    )
 
 
 async def on_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -829,6 +858,7 @@ def run() -> None:
     app.add_handler(CommandHandler("leaderboard", leaderboard))
     app.add_handler(CommandHandler("backupnow", backup_now))
     app.add_handler(CommandHandler("restoretest", restore_test))
+    app.add_handler(CallbackQueryHandler(on_intro, pattern=r"^intro:"))
     app.add_handler(CallbackQueryHandler(on_menu, pattern=r"^menu:"))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, on_webapp_data))
 

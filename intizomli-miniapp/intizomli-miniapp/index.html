@@ -7,8 +7,8 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root {
-      --bg: #0a1526;
-      --card: #11213a;
+      --bg: #081426;
+      --card: #10233f;
       --line: rgba(255, 255, 255, 0.12);
       --txt: #edf3ff;
       --muted: #9db0cf;
@@ -16,10 +16,14 @@
       --warn: #f2ad22;
       --danger: #ff6b6b;
       --brand: #2a63ff;
+      --habits: #2f6bff;
+      --sports: #22b573;
+      --reading: #f2ad22;
+      --challenge: #9b59b6;
     }
     * { box-sizing: border-box; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background: radial-gradient(circle at top, #132749, var(--bg)); color: var(--txt); }
-    .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 16px 16px 86px; }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
     .title { font-size: 22px; margin: 0 0 4px; }
     .sub { color: var(--muted); margin: 0 0 10px; }
@@ -36,7 +40,6 @@
     .item { border:1px solid var(--line); border-radius:10px; padding:8px; }
     .muted { color:var(--muted); font-size:13px; }
     .err { color: var(--danger); font-weight: 600; }
-    .ok { color: var(--ok); font-weight: 600; }
     .hidden { display:none; }
     .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
     .chip { border:1px solid var(--line); border-radius:999px; padding:4px 8px; font-size:12px; cursor:pointer; color:var(--muted); }
@@ -46,6 +49,41 @@
     .progress > div { height:100%; background:linear-gradient(90deg, #3ba5ff, #42da94); width:0%; }
     table { width:100%; border-collapse: collapse; }
     th, td { border-bottom:1px solid var(--line); padding:6px; text-align:left; font-size:12px; }
+    .module-tag { display:inline-block; padding:5px 10px; border-radius:999px; font-size:12px; font-weight:700; color:#fff; }
+    .module-habits { background: var(--habits); }
+    .module-sports { background: var(--sports); }
+    .module-reading { background: var(--reading); color: #1f1500; }
+    .module-challenge { background: var(--challenge); }
+    .tab { display:none; }
+    .tab.active { display:block; }
+    .tabbar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(8, 20, 38, 0.95);
+      border-top: 1px solid var(--line);
+      backdrop-filter: blur(6px);
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      padding: 8px;
+      z-index: 20;
+    }
+    .tabbtn {
+      border: 1px solid var(--line);
+      background: #0f1d33;
+      color: var(--muted);
+      border-radius: 10px;
+      padding: 10px 8px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .tabbtn.active {
+      background: var(--brand);
+      color: #fff;
+      border-color: var(--brand);
+    }
     @media (max-width: 760px){ .grid{ grid-template-columns:1fr; } }
   </style>
 </head>
@@ -58,11 +96,6 @@
     <p id="statusMsg" class="muted"></p>
     <p id="stepMsg" class="muted"></p>
     <p id="errorMsg" class="err"></p>
-  </div>
-
-  <div id="profileCard" class="card hidden">
-    <h3 class="section-title">👤 Profil</h3>
-    <div id="profileBody" class="list"></div>
   </div>
 
   <div id="regCard" class="card hidden">
@@ -82,9 +115,9 @@
   <div id="setupCard" class="card hidden">
     <h3 class="section-title">2) Modullarni sozlash</h3>
 
-    <div id="moduleStepHabits" class="item">
+    <div class="item">
       <h4>2.1 Odatlar</h4>
-      <p class="muted">25 kun davomida 3-6 ta odat tanlang. Har odat uchun kunlarni belgilang.</p>
+      <p class="muted">Xohlagancha odat qo'shing. Har odat uchun kunlarni belgilang.</p>
       <div class="row">
         <select id="habitTemplate" class="input"></select>
         <button class="btn" id="addHabitTemplate">Shablondan qo'shish</button>
@@ -94,12 +127,11 @@
         <button class="btn" id="addHabitCustom">Odat qo'shish</button>
       </div>
       <div id="habitList" class="list" style="margin-top:8px"></div>
-      <p class="muted">Har odatda: Daily yoki hafta kunlari.</p>
     </div>
 
-    <div id="moduleStepSports" class="item" style="margin-top:10px">
+    <div class="item" style="margin-top:10px">
       <h4>2.2 Sport</h4>
-      <p class="muted">1-3 ta sport turi. Kunlar va miqdor kiriting (masalan 100 marta).</p>
+      <p class="muted">Xohlagancha sport turi qo'shing. Kunlar va miqdor kiriting.</p>
       <div class="row">
         <select id="sportTemplate" class="input"></select>
         <button class="btn" id="addSportTemplate">Shablondan qo'shish</button>
@@ -111,9 +143,9 @@
       <div id="sportList" class="list" style="margin-top:8px"></div>
     </div>
 
-    <div id="moduleStepReading" class="item" style="margin-top:10px">
+    <div class="item" style="margin-top:10px">
       <h4>2.3 Mutolaa</h4>
-      <p class="muted">Default kitob: Intizom kuchi. Istasangiz boshqa kitob kiriting.</p>
+      <p class="muted">Default kitob: Intizom kuchi. Istasangiz o'zgartiring.</p>
       <div class="grid">
         <input id="readingBook" class="input" placeholder="Kitob nomi" />
         <input id="readingPages" class="input" placeholder="Kunlik sahifa (masalan 30)" />
@@ -122,7 +154,7 @@
 
     <div class="item" style="margin-top:10px">
       <h4>Eslatma soatlari</h4>
-      <p class="muted">Kuniga 3 mahal: tong, kun yarmi, tun.</p>
+      <p class="muted">Kuniga 3 mahal kiriting (masalan: 9,14,21).</p>
       <input id="remindersInput" class="input" placeholder="9,14,21" />
     </div>
 
@@ -144,34 +176,49 @@
     <p id="paymentMsg" class="muted"></p>
   </div>
 
-  <div id="dailyCard" class="card hidden">
-    <h3 class="section-title">📅 Bugungi hisobot</h3>
-    <p id="dayText" class="muted"></p>
-    <div id="dailyPlan" class="list"></div>
-    <div style="margin-top:10px"><button class="btn ok" id="sendDaily">Hisobot yuborish</button></div>
-    <p id="dailyMsg" class="muted"></p>
+  <div id="tabReport" class="tab active">
+    <div id="dailyCard" class="card">
+      <h3 class="section-title">📅 Bugungi hisobot</h3>
+      <p id="dayText" class="muted"></p>
+      <div id="dailyPlan" class="list"></div>
+      <div style="margin-top:10px"><button class="btn ok" id="sendDaily">Hisobot yuborish</button></div>
+      <p id="dailyMsg" class="muted"></p>
+    </div>
   </div>
 
-  <div id="progressCard" class="card hidden">
-    <h3 class="section-title">📊 Progress</h3>
-    <p id="todayRemaining" class="muted"></p>
-    <div id="moduleProgress" class="list"></div>
-    <div id="chainBoard" class="chips" style="margin-top:10px"></div>
-    <table style="margin-top:8px">
-      <thead><tr><th>Sana</th><th>Modul</th><th>Bajarildi</th><th>Foiz</th></tr></thead>
-      <tbody id="progressTable"></tbody>
-    </table>
+  <div id="tabProgress" class="tab">
+    <div id="progressCard" class="card">
+      <h3 class="section-title">📊 Progress</h3>
+      <p id="todayRemaining" class="muted"></p>
+      <div id="moduleProgress" class="list"></div>
+      <div id="chainBoard" class="chips" style="margin-top:10px"></div>
+      <table style="margin-top:8px">
+        <thead><tr><th>Sana</th><th>Modul</th><th>Bajarildi</th><th>Foiz</th></tr></thead>
+        <tbody id="progressTable"></tbody>
+      </table>
+    </div>
+    <div id="leaderboardCard" class="card">
+      <h3 class="section-title">🏆 Leaderboard</h3>
+      <div id="leaderboardBody" class="list"></div>
+    </div>
   </div>
 
-  <div id="leaderboardCard" class="card">
-    <h3 class="section-title">🏆 Leaderboard</h3>
-    <div id="leaderboardBody" class="list"></div>
+  <div id="tabProfile" class="tab">
+    <div id="profileCard" class="card">
+      <h3 class="section-title">👤 Profil</h3>
+      <div id="profileBody" class="list"></div>
+    </div>
+    <div id="certificateCard" class="card hidden">
+      <h3 class="section-title">🎓 Sertifikat</h3>
+      <p id="certificateText" class="muted"></p>
+    </div>
   </div>
+</div>
 
-  <div id="certificateCard" class="card hidden">
-    <h3 class="section-title">🎓 Sertifikat</h3>
-    <p id="certificateText" class="muted"></p>
-  </div>
+<div class="tabbar" id="tabbar">
+  <button class="tabbtn active" data-tab="report">📝 Hisobot</button>
+  <button class="tabbtn" data-tab="progress">📊 Progress</button>
+  <button class="tabbtn" data-tab="profile">👤 Profil</button>
 </div>
 
 <script>
@@ -179,6 +226,13 @@ const tg = window.Telegram?.WebApp;
 const API = new URLSearchParams(window.location.search).get("api") || "https://intizomli-api-production.up.railway.app";
 const tgUser = tg?.initDataUnsafe?.user;
 const TG_ID = tgUser?.id;
+const DEVICE_ID_KEY = `intizomli_device_${TG_ID || 'anon'}`;
+let DEVICE_ID = localStorage.getItem(DEVICE_ID_KEY);
+if (!DEVICE_ID) {
+  DEVICE_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  localStorage.setItem(DEVICE_ID_KEY, DEVICE_ID);
+}
+
 let STATE = null;
 let TEMPLATES = null;
 let PAYMENT_META = null;
@@ -204,10 +258,16 @@ async function api(path, options = {}) {
   return res.json();
 }
 
-function show(id, yes){ qs(id).classList.toggle("hidden", !yes); }
 function red(msg){ qs('errorMsg').textContent = msg || ''; }
 function setStatus(msg){ qs('statusMsg').textContent = msg || ''; }
 function setStep(msg){ qs('stepMsg').textContent = msg || ''; }
+
+function setTab(tab){
+  qs('tabReport').classList.toggle('active', tab === 'report');
+  qs('tabProgress').classList.toggle('active', tab === 'progress');
+  qs('tabProfile').classList.toggle('active', tab === 'profile');
+  [...document.querySelectorAll('.tabbtn')].forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+}
 
 function loadDraft(){
   try {
@@ -219,11 +279,8 @@ function saveDraft(patch){
   const curr = loadDraft();
   const next = {...curr, ...patch};
   localStorage.setItem(draftKey(), JSON.stringify(next));
-  setStep("Draft saqlandi.");
 }
-function clearDraft(){
-  localStorage.removeItem(draftKey());
-}
+function clearDraft(){ localStorage.removeItem(draftKey()); }
 
 function parseCsvHours(v){
   const parts = String(v || '').split(',').map(x => Number(x.trim())).filter(x => Number.isInteger(x) && x >= 0 && x <= 23);
@@ -244,7 +301,7 @@ function fieldValidationError(){
   if (age < 9 || age > 80) return "Iltimos, 'Yosh' bo'limini to'g'ri to'ldiring (9..80).";
   if (!location || location.length < 2) return "Iltimos, 'Qayerdanligi' bo'limini to'g'ri to'ldiring.";
   if (!goal || goal.length < 5) return "Iltimos, 'Maqsad' bo'limini to'g'ri to'ldiring.";
-  if (!pains || pains.length < 5) return "Iltimos, 'Og\'riqlar va muammolar' bo'limini to'g'ri to'ldiring.";
+  if (!pains || pains.length < 5) return "Iltimos, 'Og'riqlar va muammolar' bo'limini to'g'ri to'ldiring.";
   if (!expectations || expectations.length < 5) return "Iltimos, 'Kutilmalar' bo'limini to'g'ri to'ldiring.";
   return null;
 }
@@ -253,26 +310,41 @@ function renderState(){
   const badges = [
     `ID: ${TG_ID || '-'}`,
     `To'lov: ${STATE.payment_status}`,
+    `Start: ${STATE.marathon_start_date || '-'}`,
     `Kun: ${STATE.marathon_day}/${STATE.marathon_days}`,
     `Reyting: ${STATE.rating_points || 0}`,
   ];
   qs('stateBadges').innerHTML = badges.map(x => `<div class="badge">${x}</div>`).join('');
 
-  show('profileCard', true);
-  show('regCard', !STATE.registration_completed);
-  show('setupCard', STATE.registration_completed && !STATE.setup_completed);
-  show('paymentCard', STATE.registration_completed && STATE.setup_completed && STATE.payment_status !== 'paid');
-  show('dailyCard', STATE.is_active);
-  show('progressCard', true);
+  const setupDone = STATE.setup_completed;
+  const regDone = STATE.registration_completed;
+  const paidDone = STATE.payment_status === 'paid';
 
-  setStatus(STATE.is_active
-    ? "Marafon aktiv. Hisobot faqat bugungi kun uchun yuboriladi."
-    : "Marafon aktiv emas. Bosqichlarni ketma-ket yakunlang.");
-  if (!STATE.registration_completed) setStep("Bosqich: 1/3 — Ro'yxatdan o'tish");
-  else if (!STATE.setup_completed) setStep("Bosqich: 2/3 — Modullarni sozlash");
-  else if (STATE.payment_status !== 'paid') setStep("Bosqich: 3/3 — To'lov va kod aktivatsiya");
-  else setStep("Bosqichlar yakunlangan. Marafon aktiv.");
-  show('certificateCard', !!STATE.certificate_issued);
+  qs('regCard').classList.toggle('hidden', regDone);
+  qs('setupCard').classList.toggle('hidden', !(regDone && !setupDone));
+  qs('paymentCard').classList.toggle('hidden', !(regDone && setupDone && !paidDone));
+
+  const reportOpen = !!STATE.is_active;
+  qs('sendDaily').disabled = !reportOpen;
+
+  if (!regDone) {
+    setStatus("Ro'yxatdan o'tishni yakunlang.");
+    setStep("Bosqich: 1/3 — Ro'yxatdan o'tish");
+  } else if (!setupDone) {
+    setStatus("Modullarni sozlashni yakunlang.");
+    setStep("Bosqich: 2/3 — Modullarni sozlash");
+  } else if (!paidDone) {
+    setStatus("To'lov tasdiqlanishini kuting.");
+    setStep("Bosqich: 3/3 — To'lov va kod");
+  } else if (!reportOpen) {
+    setStatus(`Marafon hali boshlanmagan. Hisobot va progress ${STATE.marathon_start_date} dan boshlanadi.`);
+    setStep("To'lov tasdiqlandi. Start sanasi kutilmoqda.");
+  } else {
+    setStatus("Marafon aktiv. Hisobot faqat bugungi kun uchun yuboriladi.");
+    setStep("Marafon davom etmoqda.");
+  }
+
+  qs('certificateCard').classList.toggle('hidden', !STATE.certificate_issued);
   if (STATE.certificate_issued) {
     qs('certificateText').textContent = `Sertifikat tayyor. Kod: ${STATE.certificate_code}`;
   }
@@ -322,12 +394,8 @@ function fillTemplates(){
   const sSel = qs('sportTemplate');
   sSel.innerHTML = (TEMPLATES.sports || []).map(x => `<option>${x}</option>`).join('');
 
-  if (!habitPlans.length) {
-    habitPlans = (TEMPLATES.habits || []).slice(0, 3).map(x => ({name: x, days: ['daily']}));
-  }
-  if (!sportPlans.length) {
-    sportPlans = (TEMPLATES.sports || []).slice(0, 1).map(x => ({name: x, days: ['daily'], target_count: null}));
-  }
+  if (!habitPlans.length && Array.isArray(STATE.habits) && STATE.habits.length) habitPlans = STATE.habits;
+  if (!sportPlans.length && Array.isArray(STATE.sports) && STATE.sports.length) sportPlans = STATE.sports;
 
   qs('readingBook').value = STATE?.reading_book || TEMPLATES.default_book || 'Intizom kuchi';
   qs('readingPages').value = STATE?.reading_pages_per_day || 30;
@@ -338,8 +406,8 @@ function fillTemplates(){
 }
 
 function setupValidationError(){
-  if (habitPlans.length < 3 || habitPlans.length > 6) return "Odatlar soni 3 tadan 6 tagacha bo'lishi kerak.";
-  if (sportPlans.length < 1 || sportPlans.length > 3) return "Sportlar soni 1 tadan 3 tagacha bo'lishi kerak.";
+  if (habitPlans.length < 1) return "Kamida 1 ta odat kiriting.";
+  if (sportPlans.length < 1) return "Kamida 1 ta sport kiriting.";
   const readingBook = qs('readingBook').value.trim();
   const pages = Number(qs('readingPages').value.trim());
   if (!readingBook) return "Mutolaa bo'limida kitob nomini kiriting.";
@@ -354,9 +422,8 @@ function toggleDays(target, plans){
   const day = target.dataset.day;
   const item = plans[idx];
   if (!item) return;
-  if (day === 'daily') {
-    item.days = ['daily'];
-  } else {
+  if (day === 'daily') item.days = ['daily'];
+  else {
     item.days = (item.days || []).filter(d => d !== 'daily');
     if (item.days.includes(day)) item.days = item.days.filter(d => d !== day);
     else item.days.push(day);
@@ -364,21 +431,41 @@ function toggleDays(target, plans){
   }
 }
 
-async function loadDaily(){
-  const d = await api(`/v1/app/daily/${TG_ID}`);
-  qs('dayText').textContent = `${d.report_date} | ${d.day}-kun`;
+function moduleClass(module){
+  if (module === 'habits') return 'module-habits';
+  if (module === 'sports') return 'module-sports';
+  if (module === 'reading') return 'module-reading';
+  return 'module-challenge';
+}
 
-  const blocks = [];
-  Object.entries(d.plan || {}).forEach(([module, items]) => {
-    if (!items.length) return;
-    blocks.push(`<div class="item"><b>${module.toUpperCase()}</b></div>`);
-    items.forEach(item => {
-      const key = `${module}:${item}`;
-      const checked = d.checked?.[key] ? 'checked' : '';
-      blocks.push(`<label class="item"><input type="checkbox" data-module="${module}" data-item="${item}" ${checked}/> ${item}</label>`);
+function moduleTitle(module){
+  if (module === 'habits') return 'Odatlar';
+  if (module === 'sports') return 'Sport';
+  if (module === 'reading') return 'Mutolaa';
+  if (module === 'challenge') return 'Mashaqqat';
+  return module;
+}
+
+async function loadDaily(){
+  try {
+    const d = await api(`/v1/app/daily/${TG_ID}`);
+    qs('dayText').textContent = `${d.report_date} | ${d.day}-kun`;
+
+    const blocks = [];
+    Object.entries(d.plan || {}).forEach(([module, items]) => {
+      if (!items.length) return;
+      blocks.push(`<div class="item"><span class="module-tag ${moduleClass(module)}">${moduleTitle(module)}</span></div>`);
+      items.forEach(item => {
+        const key = `${module}:${item}`;
+        const checked = d.checked?.[key] ? 'checked' : '';
+        blocks.push(`<label class="item"><input type="checkbox" data-module="${module}" data-item="${item}" ${checked}/> ${item}</label>`);
+      });
     });
-  });
-  qs('dailyPlan').innerHTML = blocks.join('') || `<p class='muted'>Bugun vazifa yo'q.</p>`;
+    qs('dailyPlan').innerHTML = blocks.join('') || `<p class='muted'>Bugun vazifa yo'q.</p>`;
+  } catch (e) {
+    qs('dayText').textContent = '';
+    qs('dailyPlan').innerHTML = `<p class='muted'>${(e.message || '').replace(/^\{"detail":"|"\}$/g, '') || 'Hisobot hali ochilmagan'}</p>`;
+  }
 }
 
 async function loadProgress(){
@@ -387,18 +474,16 @@ async function loadProgress(){
   qs('todayRemaining').textContent = `Bugungi qoldiq: ${p.today_remaining || 0}%`;
   qs('moduleProgress').innerHTML = Object.keys(mp).map(m => `
     <div>
-      <div class="row" style="justify-content:space-between"><span>${m}</span><span>${mp[m]}%</span></div>
+      <div class="row" style="justify-content:space-between"><span>${moduleTitle(m)}</span><span>${mp[m]}%</span></div>
       <div class="progress"><div style="width:${mp[m]}%"></div></div>
     </div>`).join('') || `<p class='muted'>Hali progress yo'q.</p>`;
-  qs('progressTable').innerHTML = (p.table || []).map(r => `<tr><td>${r.date}</td><td>${r.module}</td><td>${r.done}/${r.total}</td><td>${r.percent}%</td></tr>`).join('');
+  qs('progressTable').innerHTML = (p.table || []).map(r => `<tr><td>${r.date}</td><td>${moduleTitle(r.module)}</td><td>${r.done}/${r.total}</td><td>${r.percent}%</td></tr>`).join('');
 
   const chain = p.chain || [];
   qs('chainBoard').innerHTML = chain.map((c) => {
-    let cls = '';
-    if (c.status === 'done') cls = 'active';
-    if (c.status === 'partial') cls = 'active';
+    const cls = c.status === 'empty' ? '' : 'active';
     const icon = c.status === 'done' ? '✅' : (c.status === 'partial' ? '🟨' : '⬜');
-    return `<span class=\"chip ${cls}\">${icon} ${c.day}</span>`;
+    return `<span class="chip ${cls}">${icon} ${c.day}</span>`;
   }).join('');
 }
 
@@ -406,7 +491,7 @@ async function loadLeaderboard(){
   const lb = await api('/v1/app/leaderboard?limit=10');
   const items = lb.items || [];
   qs('leaderboardBody').innerHTML = items.map((x) => `
-    <div class=\"item\"><b>${x.rank}. ${x.name}</b><div class=\"muted\">${x.rating_points} ball | streak ${x.streak} | ${x.level?.name || '-'}</div></div>
+    <div class="item"><b>${x.rank}. ${x.name}</b><div class="muted">${x.rating_points} ball | streak ${x.streak} | ${x.level?.name || '-'}</div></div>
   `).join('') || `<p class='muted'>Hali leaderboard bo'sh.</p>`;
 }
 
@@ -417,7 +502,12 @@ async function bootstrap(){
   }
   const b = await api('/v1/app/bootstrap', {
     method: 'POST',
-    body: JSON.stringify({tg_user_id: TG_ID, username: tgUser?.username || null, first_name: tgUser?.first_name || null}),
+    body: JSON.stringify({
+      tg_user_id: TG_ID,
+      username: tgUser?.username || null,
+      first_name: tgUser?.first_name || null,
+      device_id: DEVICE_ID,
+    }),
   });
   TEMPLATES = b.templates;
   PAYMENT_META = b.payment || {};
@@ -440,14 +530,11 @@ async function bootstrap(){
     if (draft.expectations) qs('expectations').value = draft.expectations;
   }
 
-  if (STATE.is_active) {
-    await loadDaily();
-  }
+  await loadDaily();
   await loadProgress();
   await loadLeaderboard();
 }
 
-// Registration
 qs('saveReg').addEventListener('click', async () => {
   red('');
   const err = fieldValidationError();
@@ -472,7 +559,6 @@ qs('saveReg').addEventListener('click', async () => {
   }
 });
 
-// Habits/Sports add
 qs('addHabitTemplate').addEventListener('click', () => {
   const name = qs('habitTemplate').value.trim();
   if (!name) return;
@@ -502,22 +588,10 @@ qs('addSportCustom').addEventListener('click', () => {
 
 qs('setupCard').addEventListener('click', (e) => {
   const t = e.target;
-  if (t.dataset.action === 'remove-habit') {
-    habitPlans.splice(Number(t.dataset.idx), 1);
-    renderHabitList();
-    return;
-  }
-  if (t.dataset.action === 'remove-sport') {
-    sportPlans.splice(Number(t.dataset.idx), 1);
-    renderSportList();
-    return;
-  }
-  if (t.classList.contains('chip') && t.closest('[data-kind="habit"]')) {
-    toggleDays(t, habitPlans); renderHabitList(); return;
-  }
-  if (t.classList.contains('chip') && t.closest('[data-kind="sport"]')) {
-    toggleDays(t, sportPlans); renderSportList(); return;
-  }
+  if (t.dataset.action === 'remove-habit') { habitPlans.splice(Number(t.dataset.idx), 1); renderHabitList(); return; }
+  if (t.dataset.action === 'remove-sport') { sportPlans.splice(Number(t.dataset.idx), 1); renderSportList(); return; }
+  if (t.classList.contains('chip') && t.closest('[data-kind="habit"]')) { toggleDays(t, habitPlans); renderHabitList(); return; }
+  if (t.classList.contains('chip') && t.closest('[data-kind="sport"]')) { toggleDays(t, sportPlans); renderSportList(); return; }
 });
 
 qs('setupCard').addEventListener('input', (e) => {
@@ -555,7 +629,6 @@ qs('saveSetup').addEventListener('click', async () => {
   }
 });
 
-// Payment
 qs('requestPayment').addEventListener('click', async () => {
   red('');
   try {
@@ -584,9 +657,9 @@ qs('verifyCode').addEventListener('click', async () => {
     if (!code) { red("Avval maxsus kodni kiriting."); return; }
     const r = await api('/v1/app/payment/verify-code', {
       method: 'POST',
-      body: JSON.stringify({tg_user_id: TG_ID, code}),
+      body: JSON.stringify({tg_user_id: TG_ID, code, device_id: DEVICE_ID}),
     });
-    qs('paymentMsg').textContent = r.marathon_started ? "✅ Marafon ochildi." : "Kod tasdiqlandi.";
+    qs('paymentMsg').textContent = r.marathon_started ? "✅ To'lov tasdiqlandi." : "Kod tasdiqlandi.";
     await bootstrap();
   } catch (e) {
     red((e.message || '').replace(/^\{"detail":"|"\}$/g, '') || "Kod tekshirishda xato");
@@ -613,6 +686,12 @@ qs('sendDaily').addEventListener('click', async () => {
   }
 });
 
+qs('tabbar').addEventListener('click', (e) => {
+  const b = e.target.closest('.tabbtn');
+  if (!b) return;
+  setTab(b.dataset.tab);
+});
+
 window.addEventListener('error', (event) => red(`Frontend xatosi: ${event.message || 'Noma\'lum'}`));
 ['fullName','age','location','goal','pains','expectations'].forEach((id) => {
   qs(id).addEventListener('input', () => {
@@ -626,6 +705,8 @@ window.addEventListener('error', (event) => red(`Frontend xatosi: ${event.messag
     });
   });
 });
+
+setTab('report');
 bootstrap().catch((e) => red(`Yuklashda xato: ${e.message || 'Load failed'}`));
 </script>
 </body>
