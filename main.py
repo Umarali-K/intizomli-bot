@@ -9,13 +9,13 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from sqlalchemy import select
+from sqlalchemy import and_, delete, select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.crud import create_referral, get_referral_count, get_reportable_users, get_user_by_tg_id, upsert_user
 from app.db import SessionLocal
-from app.models import ActivationCode
+from app.models import ActivationCode, Challenge, DailyModuleReport, PaymentTransaction, Referral
 
 ROOT_DIR = Path(__file__).resolve().parent
 load_dotenv(ROOT_DIR / ".env")
@@ -250,6 +250,72 @@ async def create_codes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(text[i : i + 3900])
 
 
+async def reset_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    tg_user = update.effective_user
+    if not tg_user:
+        return
+
+    with SessionLocal() as db:
+        user = get_user_by_tg_id(db, tg_user.id)
+        if not user:
+            await update.message.reply_text("Siz uchun saqlangan profil topilmadi. /start bosing.")
+            return
+
+        db.execute(delete(DailyModuleReport).where(DailyModuleReport.user_id == user.id))
+        db.execute(delete(Challenge).where(Challenge.user_id == user.id))
+        db.execute(delete(PaymentTransaction).where(PaymentTransaction.user_id == user.id))
+        db.execute(
+            delete(Referral).where(
+                and_(
+                    Referral.invited_tg_user_id == tg_user.id,
+                )
+            )
+        )
+        db.execute(
+            delete(Referral).where(
+                and_(
+                    Referral.referrer_tg_user_id == tg_user.id,
+                )
+            )
+        )
+
+        used_codes = db.scalars(select(ActivationCode).where(ActivationCode.used_by_tg_user_id == tg_user.id)).all()
+        for ac in used_codes:
+            ac.is_used = False
+            ac.used_by_tg_user_id = None
+            ac.used_at = None
+            db.add(ac)
+
+        user.status = "unpaid"
+        user.is_paid = False
+        user.onboarding_completed = False
+        user.rating_points = 0
+        user.current_streak = 0
+        user.marathon_start_date = None
+        user.full_name = None
+        user.age = None
+        user.location = None
+        user.goal = None
+        user.pains = None
+        user.expectations = None
+        user.registration_completed = False
+        user.selected_modules_json = None
+        user.habits_json = None
+        user.sports_json = None
+        user.reading_book = None
+        user.reading_task = None
+        user.reminder_hours_json = None
+        user.payment_status = "unpaid"
+        user.payment_confirmed_at = None
+        db.add(user)
+        db.commit()
+
+    await update.message.reply_text(
+        "✅ Profilingiz reset qilindi.\n"
+        "Endi /start bosib 0 dan ro'yxatdan o'tishingiz mumkin."
+    )
+
+
 async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     hour = context.job.data.get("hour") if context.job else None
     slot = _reminder_slot(int(hour)) if hour is not None else "midday"
@@ -298,6 +364,7 @@ def run() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("code", create_code))
     app.add_handler(CommandHandler("codes", create_codes))
+    app.add_handler(CommandHandler("resetme", reset_me))
     app.add_handler(CallbackQueryHandler(on_menu, pattern=r"^menu:"))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, on_webapp_data))
 
