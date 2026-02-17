@@ -315,6 +315,12 @@ async def reset_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user.reminder_hours_json = None
         user.payment_status = "unpaid"
         user.payment_confirmed_at = None
+        user.streak_freeze_used = False
+        user.missed_days_count = 0
+        user.last_report_date = None
+        user.last_weekly_review_sent_at = None
+        user.certificate_issued = False
+        user.certificate_code = None
         db.add(user)
         db.commit()
 
@@ -434,6 +440,70 @@ async def admin_kick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text(f"⛔️ Marafondan chiqarildi:\n{label}")
 
 
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with SessionLocal() as db:
+        users = list(
+            db.scalars(
+                select(User)
+                .where(User.payment_status == "paid")
+                .order_by(User.rating_points.desc(), User.current_streak.desc())
+                .limit(10)
+            )
+        )
+    if not users:
+        await update.message.reply_text("Hali leaderboard bo'sh.")
+        return
+    lines = []
+    for i, u in enumerate(users, start=1):
+        name = (u.full_name or u.first_name or u.username or f"User {u.tg_user_id}").strip()
+        lines.append(f"{i}. {name} — {u.rating_points} ball | streak {u.current_streak}")
+    await update.message.reply_text("🏆 *Top 10 Leaderboard*\n\n" + "\n".join(lines), parse_mode="Markdown")
+
+
+async def weekly_review_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Sunday review; safe to run daily on schedule, exits on non-Sunday.
+    today = date.today()
+    if today.weekday() != 6:
+        return
+
+    start = today.fromordinal(today.toordinal() - 6)
+    with SessionLocal() as db:
+        users = get_reportable_users(db)
+        for user in users:
+            done = db.scalar(
+                select(func.count()).select_from(DailyModuleReport).where(
+                    and_(
+                        DailyModuleReport.user_id == user.id,
+                        DailyModuleReport.report_date >= start,
+                        DailyModuleReport.report_date <= today,
+                        DailyModuleReport.is_done.is_(True),
+                    )
+                )
+            ) or 0
+            total = db.scalar(
+                select(func.count()).select_from(DailyModuleReport).where(
+                    and_(
+                        DailyModuleReport.user_id == user.id,
+                        DailyModuleReport.report_date >= start,
+                        DailyModuleReport.report_date <= today,
+                    )
+                )
+            ) or 0
+            percent = int((done * 100) / total) if total else 0
+            msg = (
+                "📅 *Haftalik review*\n\n"
+                f"Sana: {start.isoformat()} — {today.isoformat()}\n"
+                f"Bajarilgan: {done}/{total}\n"
+                f"Haftalik foiz: {percent}%\n"
+                f"Joriy streak: {user.current_streak}\n\n"
+                "Kelasi haftaga maqsadni aniq qo'ying va ritmni ushlang."
+            )
+            try:
+                await context.bot.send_message(chat_id=user.tg_user_id, text=msg, parse_mode="Markdown")
+            except Exception:
+                continue
+
+
 async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     hour = context.job.data.get("hour") if context.job else None
     slot = _reminder_slot(int(hour)) if hour is not None else "midday"
@@ -493,6 +563,29 @@ async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             except Exception:
                 continue
 
+        if slot == "night" and ADMIN_TG_IDS:
+            paid_users = list(db.scalars(select(User).where(User.payment_status == "paid")))
+            submitted_ids = set(
+                db.scalars(
+                    select(DailyModuleReport.user_id)
+                    .where(DailyModuleReport.report_date == date.today())
+                    .group_by(DailyModuleReport.user_id)
+                )
+            )
+            missed = [u for u in paid_users if u.id not in submitted_ids]
+            if missed:
+                lines = [f"- {_user_label(u)}" for u in missed[:50]]
+                admin_text = (
+                    f"🚨 *Mentor ping*\\n\\n"
+                    f"Bugun hisobot yubormaganlar soni: *{len(missed)}*\\n\\n"
+                    + "\\n".join(lines)
+                )
+                for admin_tg_id in ADMIN_TG_IDS:
+                    try:
+                        await context.bot.send_message(chat_id=admin_tg_id, text=admin_text, parse_mode="Markdown")
+                    except Exception:
+                        continue
+
 
 def run() -> None:
     if not BOT_TOKEN:
@@ -507,6 +600,7 @@ def run() -> None:
     app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(CommandHandler("missed", admin_missed))
     app.add_handler(CommandHandler("kick", admin_kick))
+    app.add_handler(CommandHandler("leaderboard", leaderboard))
     app.add_handler(CallbackQueryHandler(on_menu, pattern=r"^menu:"))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, on_webapp_data))
 
@@ -523,6 +617,12 @@ def run() -> None:
                 name=f"module-reminder-{hr}",
                 data={"hour": int(hr)},
             )
+        app.job_queue.run_daily(
+            weekly_review_job,
+            time=dtime(hour=21, minute=30, tzinfo=tz),
+            name="weekly-review",
+            data={"kind": "weekly-review"},
+        )
 
     print("✅ Bot ishga tushdi...")
     app.run_polling()

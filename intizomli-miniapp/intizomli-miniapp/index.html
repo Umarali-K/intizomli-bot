@@ -56,6 +56,7 @@
     <p class="sub">Ro'yxatdan o'tish → Modul sozlash → To'lov → 25 kunlik marafon</p>
     <div id="stateBadges" class="row"></div>
     <p id="statusMsg" class="muted"></p>
+    <p id="stepMsg" class="muted"></p>
     <p id="errorMsg" class="err"></p>
   </div>
 
@@ -153,11 +154,23 @@
 
   <div id="progressCard" class="card hidden">
     <h3 class="section-title">📊 Progress</h3>
+    <p id="todayRemaining" class="muted"></p>
     <div id="moduleProgress" class="list"></div>
+    <div id="chainBoard" class="chips" style="margin-top:10px"></div>
     <table style="margin-top:8px">
       <thead><tr><th>Sana</th><th>Modul</th><th>Bajarildi</th><th>Foiz</th></tr></thead>
       <tbody id="progressTable"></tbody>
     </table>
+  </div>
+
+  <div id="leaderboardCard" class="card">
+    <h3 class="section-title">🏆 Leaderboard</h3>
+    <div id="leaderboardBody" class="list"></div>
+  </div>
+
+  <div id="certificateCard" class="card hidden">
+    <h3 class="section-title">🎓 Sertifikat</h3>
+    <p id="certificateText" class="muted"></p>
   </div>
 </div>
 
@@ -180,6 +193,7 @@ let weekdays = [
 if (tg) { tg.ready(); tg.expand(); }
 
 const qs = (id) => document.getElementById(id);
+const draftKey = () => `intizomli_draft_${TG_ID || 'anon'}`;
 
 async function api(path, options = {}) {
   const res = await fetch(API + path, { headers: {"Content-Type":"application/json"}, ...options });
@@ -193,6 +207,23 @@ async function api(path, options = {}) {
 function show(id, yes){ qs(id).classList.toggle("hidden", !yes); }
 function red(msg){ qs('errorMsg').textContent = msg || ''; }
 function setStatus(msg){ qs('statusMsg').textContent = msg || ''; }
+function setStep(msg){ qs('stepMsg').textContent = msg || ''; }
+
+function loadDraft(){
+  try {
+    const raw = localStorage.getItem(draftKey());
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function saveDraft(patch){
+  const curr = loadDraft();
+  const next = {...curr, ...patch};
+  localStorage.setItem(draftKey(), JSON.stringify(next));
+  setStep("Draft saqlandi.");
+}
+function clearDraft(){
+  localStorage.removeItem(draftKey());
+}
 
 function parseCsvHours(v){
   const parts = String(v || '').split(',').map(x => Number(x.trim())).filter(x => Number.isInteger(x) && x >= 0 && x <= 23);
@@ -237,6 +268,14 @@ function renderState(){
   setStatus(STATE.is_active
     ? "Marafon aktiv. Hisobot faqat bugungi kun uchun yuboriladi."
     : "Marafon aktiv emas. Bosqichlarni ketma-ket yakunlang.");
+  if (!STATE.registration_completed) setStep("Bosqich: 1/3 — Ro'yxatdan o'tish");
+  else if (!STATE.setup_completed) setStep("Bosqich: 2/3 — Modullarni sozlash");
+  else if (STATE.payment_status !== 'paid') setStep("Bosqich: 3/3 — To'lov va kod aktivatsiya");
+  else setStep("Bosqichlar yakunlangan. Marafon aktiv.");
+  show('certificateCard', !!STATE.certificate_issued);
+  if (STATE.certificate_issued) {
+    qs('certificateText').textContent = `Sertifikat tayyor. Kod: ${STATE.certificate_code}`;
+  }
 }
 
 function renderProfile(){
@@ -345,12 +384,30 @@ async function loadDaily(){
 async function loadProgress(){
   const p = await api(`/v1/app/progress/${TG_ID}`);
   const mp = p.module_percent || {};
+  qs('todayRemaining').textContent = `Bugungi qoldiq: ${p.today_remaining || 0}%`;
   qs('moduleProgress').innerHTML = Object.keys(mp).map(m => `
     <div>
       <div class="row" style="justify-content:space-between"><span>${m}</span><span>${mp[m]}%</span></div>
       <div class="progress"><div style="width:${mp[m]}%"></div></div>
     </div>`).join('') || `<p class='muted'>Hali progress yo'q.</p>`;
   qs('progressTable').innerHTML = (p.table || []).map(r => `<tr><td>${r.date}</td><td>${r.module}</td><td>${r.done}/${r.total}</td><td>${r.percent}%</td></tr>`).join('');
+
+  const chain = p.chain || [];
+  qs('chainBoard').innerHTML = chain.map((c) => {
+    let cls = '';
+    if (c.status === 'done') cls = 'active';
+    if (c.status === 'partial') cls = 'active';
+    const icon = c.status === 'done' ? '✅' : (c.status === 'partial' ? '🟨' : '⬜');
+    return `<span class=\"chip ${cls}\">${icon} ${c.day}</span>`;
+  }).join('');
+}
+
+async function loadLeaderboard(){
+  const lb = await api('/v1/app/leaderboard?limit=10');
+  const items = lb.items || [];
+  qs('leaderboardBody').innerHTML = items.map((x) => `
+    <div class=\"item\"><b>${x.rank}. ${x.name}</b><div class=\"muted\">${x.rating_points} ball | streak ${x.streak} | ${x.level?.name || '-'}</div></div>
+  `).join('') || `<p class='muted'>Hali leaderboard bo'sh.</p>`;
 }
 
 async function bootstrap(){
@@ -373,10 +430,21 @@ async function bootstrap(){
   renderProfile();
   fillTemplates();
 
+  const draft = loadDraft();
+  if (!STATE.registration_completed && Object.keys(draft).length) {
+    if (draft.fullName) qs('fullName').value = draft.fullName;
+    if (draft.age) qs('age').value = draft.age;
+    if (draft.location) qs('location').value = draft.location;
+    if (draft.goal) qs('goal').value = draft.goal;
+    if (draft.pains) qs('pains').value = draft.pains;
+    if (draft.expectations) qs('expectations').value = draft.expectations;
+  }
+
   if (STATE.is_active) {
     await loadDaily();
   }
   await loadProgress();
+  await loadLeaderboard();
 }
 
 // Registration
@@ -397,6 +465,7 @@ qs('saveReg').addEventListener('click', async () => {
         expectations: qs('expectations').value.trim(),
       }),
     });
+    clearDraft();
     await bootstrap();
   } catch (e) {
     red((e.message || '').replace(/^\{"detail":"|"\}$/g, '') || "Ro'yxatdan o'tishda xato");
@@ -479,6 +548,7 @@ qs('saveSetup').addEventListener('click', async () => {
         reminder_hours: parseCsvHours(qs('remindersInput').value),
       }),
     });
+    clearDraft();
     await bootstrap();
   } catch (e) {
     red((e.message || '').replace(/^\{"detail":"|"\}$/g, '') || "Modul sozlashda xato");
@@ -544,6 +614,18 @@ qs('sendDaily').addEventListener('click', async () => {
 });
 
 window.addEventListener('error', (event) => red(`Frontend xatosi: ${event.message || 'Noma\'lum'}`));
+['fullName','age','location','goal','pains','expectations'].forEach((id) => {
+  qs(id).addEventListener('input', () => {
+    saveDraft({
+      fullName: qs('fullName').value,
+      age: qs('age').value,
+      location: qs('location').value,
+      goal: qs('goal').value,
+      pains: qs('pains').value,
+      expectations: qs('expectations').value,
+    });
+  });
+});
 bootstrap().catch((e) => red(`Yuklashda xato: ${e.message || 'Load failed'}`));
 </script>
 </body>

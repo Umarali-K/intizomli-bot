@@ -13,6 +13,8 @@ class Settings:
     API_PUBLIC_URL: str = os.getenv("API_PUBLIC_URL", "http://localhost:8000")
     ADMIN_CONTACT_USERNAME: str = os.getenv("ADMIN_CONTACT_USERNAME", "").strip().lstrip("@")
     ADMIN_TG_IDS: str = os.getenv("ADMIN_TG_IDS", "")
+    ADMIN_API_TOKEN: str = os.getenv("ADMIN_API_TOKEN", "").strip()
+    ADMIN_CONFIRM_TOKEN: str = os.getenv("ADMIN_CONFIRM_TOKEN", "").strip()
     PAYMENT_MODE: str = os.getenv("PAYMENT_MODE", "manual_code").strip().lower()
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./intizomli.db")
     AUTO_CREATE_SCHEMA: bool = os.getenv("AUTO_CREATE_SCHEMA", "0") == "1"

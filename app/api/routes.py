@@ -131,6 +131,40 @@ def _is_active(user: User) -> bool:
     return user.registration_completed and _is_setup_completed(user) and user.payment_status == "paid"
 
 
+def _level_from_points(points: int) -> Dict[str, Any]:
+    if points >= 900:
+        return {"name": "Legend", "tier": 5}
+    if points >= 600:
+        return {"name": "Titan", "tier": 4}
+    if points >= 350:
+        return {"name": "Oltin", "tier": 3}
+    if points >= 150:
+        return {"name": "Kumush", "tier": 2}
+    return {"name": "Bronza", "tier": 1}
+
+
+def _weighted_daily_score(done_by_module: Dict[str, int], total_by_module: Dict[str, int]) -> int:
+    weights = {"habits": 40, "sports": 35, "reading": 25}
+    score = 0.0
+    for module, weight in weights.items():
+        total = int(total_by_module.get(module, 0))
+        done = int(done_by_module.get(module, 0))
+        ratio = (done / total) if total else 0.0
+        score += ratio * weight
+    return int(round(score))
+
+
+def _issue_certificate_if_ready(user: User) -> None:
+    day_no = _marathon_day(user)
+    if user.certificate_issued:
+        return
+    if day_no < user.marathon_days:
+        return
+    code = f"CERT-{user.tg_user_id}-{day_no}"
+    user.certificate_issued = True
+    user.certificate_code = code
+
+
 def _challenge_tasks(numbers: List[int]) -> List[str]:
     tasks: List[str] = []
     for number in numbers:
@@ -921,6 +955,10 @@ def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
             reading_pages = int(str(user.reading_task).split()[0])
         except Exception:
             reading_pages = 30
+    level = _level_from_points(user.rating_points or 0)
+    _issue_certificate_if_ready(user)
+    db.add(user)
+    db.commit()
 
     return {
         "tg_user_id": user.tg_user_id,
@@ -935,6 +973,7 @@ def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
         "payment_status": user.payment_status,
         "is_active": _is_active(user),
         "rating_points": user.rating_points,
+        "level": level,
         "marathon_day": _marathon_day(user),
         "marathon_days": user.marathon_days,
         "modules": modules,
@@ -948,6 +987,8 @@ def app_state(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
         "payment_mode": PAYMENT_MODE,
         "admin_username": ADMIN_CONTACT_USERNAME,
         "admin_url": f"https://t.me/{ADMIN_CONTACT_USERNAME}" if ADMIN_CONTACT_USERNAME else None,
+        "certificate_issued": user.certificate_issued,
+        "certificate_code": user.certificate_code,
     }
 
 
@@ -995,6 +1036,8 @@ def app_daily_report(payload: Dict[str, Any], db: Session = Depends(get_db)) -> 
 
     total = 0
     done = 0
+    done_by_module: Dict[str, int] = {}
+    total_by_module: Dict[str, int] = {}
     for module, items in plan.items():
         checked_set = set([str(x) for x in checked.get(module, [])])
         for item in items:
@@ -1009,16 +1052,49 @@ def app_daily_report(payload: Dict[str, Any], db: Session = Depends(get_db)) -> 
                 )
             )
             total += 1
+            total_by_module[module] = total_by_module.get(module, 0) + 1
             if is_done:
                 done += 1
+                done_by_module[module] = done_by_module.get(module, 0) + 1
 
     percent = int((done * 100) / total) if total else 0
-    user.rating_points += done
-    user.current_streak = user.current_streak + 1 if percent >= 70 else 0
+    weighted_score = _weighted_daily_score(done_by_module, total_by_module)
+
+    # Discipline model:
+    # - >= 85 => strong day, bonus
+    # - >= 70 => normal completed day
+    # - < 70 => penalty, one-time freeze can protect streak
+    points_gain = done
+    if weighted_score >= 85:
+        points_gain += 5
+    user.rating_points += points_gain
+
+    if weighted_score >= 70:
+        user.current_streak += 1
+    else:
+        user.rating_points = max(0, user.rating_points - 3)
+        user.missed_days_count = (user.missed_days_count or 0) + 1
+        if user.current_streak > 0 and not user.streak_freeze_used:
+            user.streak_freeze_used = True
+        else:
+            user.current_streak = 0
+
+    user.last_report_date = report_date
+    _issue_certificate_if_ready(user)
     db.add(user)
     db.commit()
 
-    return {"ok": True, "done": done, "total": total, "percent": percent, "rating": user.rating_points}
+    return {
+        "ok": True,
+        "done": done,
+        "total": total,
+        "percent": percent,
+        "daily_score": weighted_score,
+        "points_gain": points_gain,
+        "rating": user.rating_points,
+        "streak": user.current_streak,
+        "streak_freeze_used": user.streak_freeze_used,
+    }
 
 
 @router.post("/v1/app/challenge/pick")
@@ -1060,7 +1136,7 @@ def app_challenge_pick(payload: Dict[str, Any], db: Session = Depends(get_db)) -
 @router.get("/v1/app/progress/{tg_user_id}")
 def app_progress(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     user = _get_user_or_404(db, tg_user_id)
-    start = date.today() - timedelta(days=13)
+    start = date.today() - timedelta(days=24)
 
     rows = db.execute(
         select(
@@ -1098,11 +1174,98 @@ def app_progress(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, An
         for module in module_total
     }
 
+    by_date: Dict[str, Dict[str, int]] = {}
+    for row in table:
+        date_key = row["date"]
+        if date_key not in by_date:
+            by_date[date_key] = {"done": 0, "total": 0}
+        by_date[date_key]["done"] += int(row["done"])
+        by_date[date_key]["total"] += int(row["total"])
+
+    daily_scores: Dict[str, int] = {}
+    for date_key, agg in by_date.items():
+        # Reconstruct with global ratio for lightweight board preview
+        total_val = int(agg["total"])
+        done_val = int(agg["done"])
+        daily_scores[date_key] = int((done_val * 100) / total_val) if total_val else 0
+
+    chain: list[Dict[str, Any]] = []
+    if user.marathon_start_date:
+        for offset in range(user.marathon_days):
+            d = user.marathon_start_date + timedelta(days=offset)
+            key = d.isoformat()
+            score = daily_scores.get(key)
+            chain.append(
+                {
+                    "date": key,
+                    "day": offset + 1,
+                    "score": score if score is not None else 0,
+                    "status": "done" if (score is not None and score >= 70) else ("partial" if score is not None else "empty"),
+                }
+            )
+
     return {
         "rating_points": user.rating_points,
         "current_streak": user.current_streak,
+        "level": _level_from_points(user.rating_points or 0),
+        "today_remaining": max(0, 100 - daily_scores.get(date.today().isoformat(), 0)),
         "module_percent": module_percent,
+        "daily_scores": daily_scores,
+        "chain": chain,
         "table": table,
+    }
+
+
+@router.get("/v1/app/leaderboard")
+def app_leaderboard(limit: int = 10, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    limit = max(3, min(limit, 50))
+    users = list(
+        db.scalars(
+            select(User)
+            .where(User.payment_status == "paid")
+            .order_by(User.rating_points.desc(), User.current_streak.desc())
+            .limit(limit)
+        )
+    )
+    return {
+        "count": len(users),
+        "items": [
+            {
+                "rank": idx + 1,
+                "tg_user_id": u.tg_user_id,
+                "name": u.full_name or u.first_name or u.username or f"User {u.tg_user_id}",
+                "username": u.username,
+                "rating_points": u.rating_points,
+                "streak": u.current_streak,
+                "level": _level_from_points(u.rating_points or 0),
+            }
+            for idx, u in enumerate(users)
+        ],
+    }
+
+
+@router.get("/v1/app/certificate/{tg_user_id}")
+def app_certificate(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    user = _get_user_or_404(db, tg_user_id)
+    _issue_certificate_if_ready(user)
+    db.add(user)
+    db.commit()
+    if not user.certificate_issued:
+        raise HTTPException(status_code=400, detail="certificate not ready")
+    return {
+        "tg_user_id": user.tg_user_id,
+        "full_name": user.full_name,
+        "certificate_code": user.certificate_code,
+        "issued": user.certificate_issued,
+        "rating_points": user.rating_points,
+        "streak": user.current_streak,
+        "level": _level_from_points(user.rating_points or 0),
+        "text": (
+            f"Sertifikat\\n"
+            f"Ism: {user.full_name or user.first_name or user.tg_user_id}\\n"
+            f"Kod: {user.certificate_code}\\n"
+            f"Natija: {user.rating_points} ball | streak {user.current_streak}"
+        ),
     }
 
 
@@ -1110,6 +1273,9 @@ def app_progress(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, An
 def profile(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     user = _get_user_or_404(db, tg_user_id)
     day_no = _marathon_day(user)
+    _issue_certificate_if_ready(user)
+    db.add(user)
+    db.commit()
     return {
         "tg_user_id": tg_user_id,
         "full_name": user.full_name,
@@ -1126,5 +1292,8 @@ def profile(tg_user_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
         "remaining_days": max(0, user.marathon_days - day_no),
         "rating_points": user.rating_points,
         "current_streak": user.current_streak,
+        "level": _level_from_points(user.rating_points or 0),
+        "certificate_issued": user.certificate_issued,
+        "certificate_code": user.certificate_code,
         "referral_count": get_referral_count(db, tg_user_id),
     }
