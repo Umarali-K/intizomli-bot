@@ -335,18 +335,39 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         total_users = db.scalar(select(func.count()).select_from(User)) or 0
         paid_users = db.scalar(select(func.count()).select_from(User).where(User.payment_status == "paid")) or 0
         active_users = db.scalar(select(func.count()).select_from(User).where(User.status == "active")) or 0
-        submitted_users = db.scalar(
-            select(func.count(func.distinct(DailyModuleReport.user_id))).where(DailyModuleReport.report_date == today)
-        ) or 0
+        paid_user_rows = list(db.scalars(select(User).where(User.payment_status == "paid").order_by(User.created_at.desc())))
+        submitted_internal_ids = set(
+            db.scalars(
+                select(DailyModuleReport.user_id)
+                .where(DailyModuleReport.report_date == today)
+                .group_by(DailyModuleReport.user_id)
+            )
+        )
+
+    submitted = [u for u in paid_user_rows if u.id in submitted_internal_ids]
+    missed = [u for u in paid_user_rows if u.id not in submitted_internal_ids]
 
     text = (
         "📊 *Admin statistika*\n\n"
         f"Jami userlar: *{total_users}*\n"
         f"To'laganlar: *{paid_users}*\n"
         f"Aktivlar: *{active_users}*\n"
-        f"Bugun hisobot yuborganlar: *{submitted_users}*"
+        f"Bugun hisobot yuborganlar: *{len(submitted)}*\n"
+        f"Bugun hisobot yubormaganlar: *{len(missed)}*"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
+
+    submitted_lines = [f"- {_user_label(u)}" for u in submitted[:50]]
+    missed_lines = [f"- {_user_label(u)}" for u in missed[:50]]
+
+    await update.message.reply_text(
+        "✅ *Bugun yuborganlar*:\n" + ("\n".join(submitted_lines) if submitted_lines else "- yo'q"),
+        parse_mode="Markdown",
+    )
+    await update.message.reply_text(
+        "⚠️ *Bugun yubormaganlar*:\n" + ("\n".join(missed_lines) if missed_lines else "- yo'q"),
+        parse_mode="Markdown",
+    )
 
 
 async def admin_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -374,12 +395,9 @@ async def admin_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         missed = [u for u in paid_users if u.id not in submitted_ids]
 
-    if not missed:
-        await update.message.reply_text(f"✅ {target_date.isoformat()} kuni hamma hisobot yuborgan.")
-        return
-
-    lines = [f"- {_user_label(u)}" for u in missed]
-    text = f"⚠️ *Hisobot yubormaganlar* ({target_date.isoformat()})\n\n" + "\n".join(lines)
+    lines = [f"- {_user_label(u)}" for u in missed] or ["- yo'q"]
+    header = f"⚠️ *Hisobot yubormaganlar* ({target_date.isoformat()})\nSoni: *{len(missed)}*\n\n"
+    text = header + "\n".join(lines)
     for i in range(0, len(text), 3900):
         await update.message.reply_text(text[i : i + 3900], parse_mode="Markdown")
 
