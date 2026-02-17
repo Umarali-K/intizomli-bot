@@ -20,9 +20,18 @@ from app.models import ActivationCode
 ROOT_DIR = Path(__file__).resolve().parent
 load_dotenv(ROOT_DIR / ".env")
 
+def _clean_env_url(value: str, key_name: str) -> str:
+    raw = (value or "").strip()
+    lower = raw.lower()
+    prefix = f"{key_name.lower()}="
+    if lower.startswith(prefix):
+        raw = raw[len(prefix) :].strip()
+    return raw
+
+
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-MINIAPP_URL = os.getenv("MINIAPP_URL", "https://intizomli-miniapp.vercel.app")
-API_PUBLIC_URL = os.getenv("API_PUBLIC_URL", "http://localhost:8000")
+MINIAPP_URL = _clean_env_url(os.getenv("MINIAPP_URL", "https://intizomli-miniapp.vercel.app"), "MINIAPP_URL")
+API_PUBLIC_URL = _clean_env_url(os.getenv("API_PUBLIC_URL", "http://localhost:8000"), "API_PUBLIC_URL")
 BOT_TIMEZONE = os.getenv("BOT_TIMEZONE", "Asia/Tashkent")
 REMINDER_HOURS = [int(x) for x in os.getenv("REMINDER_HOURS", "9,14,21").split(",") if x.strip()]
 ADMIN_TG_IDS = {int(x.strip()) for x in os.getenv("ADMIN_TG_IDS", "").split(",") if x.strip().isdigit()}
