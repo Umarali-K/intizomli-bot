@@ -3,19 +3,20 @@ import os
 import random
 import string
 from datetime import time as dtime
+from datetime import date
 from pathlib import Path
 from typing import List
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, func, select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.crud import create_referral, get_referral_count, get_reportable_users, get_user_by_tg_id, upsert_user
 from app.db import SessionLocal
-from app.models import ActivationCode, Challenge, DailyModuleReport, PaymentTransaction, Referral
+from app.models import ActivationCode, Challenge, DailyModuleReport, PaymentTransaction, Referral, User
 
 ROOT_DIR = Path(__file__).resolve().parent
 load_dotenv(ROOT_DIR / ".env")
@@ -84,6 +85,13 @@ def _reminder_slot(hour: int) -> str:
     if len(hours) > 1 and hour == hours[1]:
         return "midday"
     return "night"
+
+
+def _user_label(user: User) -> str:
+    name = (user.full_name or "").strip() or (user.first_name or "").strip() or (user.username or "").strip()
+    if user.username:
+        return f"{name} (@{user.username}) [{user.tg_user_id}]"
+    return f"{name} [{user.tg_user_id}]"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -316,43 +324,156 @@ async def reset_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        await update.message.reply_text("❌ Siz admin emassiz.")
+        return
+
+    today = date.today()
+    with SessionLocal() as db:
+        total_users = db.scalar(select(func.count()).select_from(User)) or 0
+        paid_users = db.scalar(select(func.count()).select_from(User).where(User.payment_status == "paid")) or 0
+        active_users = db.scalar(select(func.count()).select_from(User).where(User.status == "active")) or 0
+        submitted_users = db.scalar(
+            select(func.count(func.distinct(DailyModuleReport.user_id))).where(DailyModuleReport.report_date == today)
+        ) or 0
+
+    text = (
+        "📊 *Admin statistika*\n\n"
+        f"Jami userlar: *{total_users}*\n"
+        f"To'laganlar: *{paid_users}*\n"
+        f"Aktivlar: *{active_users}*\n"
+        f"Bugun hisobot yuborganlar: *{submitted_users}*"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def admin_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not _is_admin(user_id):
+        await update.message.reply_text("❌ Siz admin emassiz.")
+        return
+
+    target_date = date.today()
+    if context.args:
+        try:
+            target_date = date.fromisoformat(context.args[0])
+        except Exception:
+            await update.message.reply_text("Foydalanish: /missed yoki /missed YYYY-MM-DD")
+            return
+
+    with SessionLocal() as db:
+        paid_users = list(db.scalars(select(User).where(User.payment_status == "paid")))
+        submitted_ids = set(
+            db.scalars(
+                select(DailyModuleReport.user_id)
+                .where(DailyModuleReport.report_date == target_date)
+                .group_by(DailyModuleReport.user_id)
+            )
+        )
+        missed = [u for u in paid_users if u.id not in submitted_ids]
+
+    if not missed:
+        await update.message.reply_text(f"✅ {target_date.isoformat()} kuni hamma hisobot yuborgan.")
+        return
+
+    lines = [f"- {_user_label(u)}" for u in missed]
+    text = f"⚠️ *Hisobot yubormaganlar* ({target_date.isoformat()})\n\n" + "\n".join(lines)
+    for i in range(0, len(text), 3900):
+        await update.message.reply_text(text[i : i + 3900], parse_mode="Markdown")
+
+
+async def admin_kick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = update.effective_user.id
+    if not _is_admin(admin_id):
+        await update.message.reply_text("❌ Siz admin emassiz.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Foydalanish: /kick <tg_user_id>")
+        return
+
+    try:
+        target_tg_id = int(context.args[0])
+    except Exception:
+        await update.message.reply_text("❌ tg_user_id noto'g'ri.")
+        return
+
+    with SessionLocal() as db:
+        user = get_user_by_tg_id(db, target_tg_id)
+        if not user:
+            await update.message.reply_text("❌ User topilmadi.")
+            return
+        user.status = "kicked"
+        user.is_paid = False
+        user.payment_status = "kicked"
+        user.onboarding_completed = False
+        db.add(user)
+        db.commit()
+        label = _user_label(user)
+
+    await update.message.reply_text(f"⛔️ Marafondan chiqarildi:\n{label}")
+
+
 async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     hour = context.job.data.get("hour") if context.job else None
     slot = _reminder_slot(int(hour)) if hour is not None else "midday"
     with SessionLocal() as db:
         users = get_reportable_users(db)
+        for user in users:
+            modules = _user_modules(user)
+            if not modules:
+                continue
+            today = date.today()
+            total_today = db.scalar(
+                select(func.count()).select_from(DailyModuleReport).where(
+                    and_(DailyModuleReport.user_id == user.id, DailyModuleReport.report_date == today)
+                )
+            ) or 0
+            done_today = db.scalar(
+                select(func.count()).select_from(DailyModuleReport).where(
+                    and_(
+                        DailyModuleReport.user_id == user.id,
+                        DailyModuleReport.report_date == today,
+                        DailyModuleReport.is_done.is_(True),
+                    )
+                )
+            ) or 0
+            pending_hint = ""
+            if slot == "night":
+                if total_today == 0:
+                    pending_hint = "\n\n⚠️ Bugun hali hisobot yuborilmadi."
+                elif done_today < total_today:
+                    pending_hint = f"\n\n⚠️ Hisobot tugallanmagan: {done_today}/{total_today}"
 
-    for user in users:
-        modules = _user_modules(user)
-        if not modules:
-            continue
-        if slot == "morning":
-            msg = (
-                "🌅 *Tonggi eslatma*\n\n"
-                "Yangi kun boshlandi. Bugungi odatlar, sport va mutolaani bajarishni boshlang."
-            )
-        elif slot == "midday":
-            msg = (
-                "🕑 *Kun yarmidagi eslatma*\n\n"
-                "Rejadan ortda qolmang, bugungi vazifalarni davom ettiring."
-            )
-        else:
-            msg = (
-                "🌙 *Tungi eslatma*\n\n"
-                "Kun yakunlandi. Mini App'da bugungi hisobotni yuborishni unutmang."
-            )
-        msg = msg + f"\n\nBugungi modullar: {', '.join(modules)}"
-        try:
-            await context.bot.send_message(
-                chat_id=user.tg_user_id,
-                text=msg,
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("📱 Mini Appni ochish", web_app=WebAppInfo(url=build_miniapp_url()))]]
-                ),
-            )
-        except Exception:
-            continue
+            if slot == "morning":
+                msg = (
+                    "🌅 *Tonggi eslatma*\n\n"
+                    "Yangi kun boshlandi. Bugungi odatlar, sport va mutolaani bajarishni boshlang."
+                )
+            elif slot == "midday":
+                msg = (
+                    "🕑 *Kun yarmidagi eslatma*\n\n"
+                    "Rejadan ortda qolmang, bugungi vazifalarni davom ettiring."
+                )
+            else:
+                msg = (
+                    "🌙 *Tungi eslatma*\n\n"
+                    "Kun yakunlandi. Mini App'da bugungi hisobotni yuborishni unutmang."
+                )
+            msg = msg + f"\n\nBugungi modullar: {', '.join(modules)}{pending_hint}"
+            try:
+                await context.bot.send_message(
+                    chat_id=user.tg_user_id,
+                    text=msg,
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("📱 Mini Appni ochish", web_app=WebAppInfo(url=build_miniapp_url()))]]
+                    ),
+                )
+            except Exception:
+                continue
 
 
 def run() -> None:
@@ -365,6 +486,9 @@ def run() -> None:
     app.add_handler(CommandHandler("code", create_code))
     app.add_handler(CommandHandler("codes", create_codes))
     app.add_handler(CommandHandler("resetme", reset_me))
+    app.add_handler(CommandHandler("stats", admin_stats))
+    app.add_handler(CommandHandler("missed", admin_missed))
+    app.add_handler(CommandHandler("kick", admin_kick))
     app.add_handler(CallbackQueryHandler(on_menu, pattern=r"^menu:"))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, on_webapp_data))
 
