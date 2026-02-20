@@ -35,7 +35,27 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 MINIAPP_URL = _clean_env_url(os.getenv("MINIAPP_URL", "https://intizomli-miniapp.vercel.app"), "MINIAPP_URL")
 API_PUBLIC_URL = _clean_env_url(os.getenv("API_PUBLIC_URL", "http://localhost:8000"), "API_PUBLIC_URL")
 BOT_TIMEZONE = os.getenv("BOT_TIMEZONE", "Asia/Tashkent")
-REMINDER_HOURS = [int(x) for x in os.getenv("REMINDER_HOURS", "9,14,21").split(",") if x.strip()]
+
+
+def _parse_reminder_hours(raw: str) -> List[int]:
+    vals: List[int] = []
+    for x in (raw or "").split(","):
+        x = x.strip()
+        if not x:
+            continue
+        try:
+            hour = int(x)
+        except ValueError:
+            continue
+        if 0 <= hour <= 23 and hour not in vals:
+            vals.append(hour)
+    vals = sorted(vals)
+    if len(vals) >= 3:
+        return vals[:3]
+    return [9, 14, 21]
+
+
+REMINDER_HOURS = _parse_reminder_hours(os.getenv("REMINDER_HOURS", "9,14,21"))
 ADMIN_TG_IDS = {int(x.strip()) for x in os.getenv("ADMIN_TG_IDS", "").split(",") if x.strip().isdigit()}
 ACTIVATION_CODE_TTL_HOURS = int(os.getenv("ACTIVATION_CODE_TTL_HOURS", "720"))
 RETENTION_DAYS = [int(x.strip()) for x in os.getenv("RETENTION_DAYS", "2,3,5").split(",") if x.strip().isdigit()]
@@ -388,25 +408,23 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     missed = [u for u in paid_user_rows if u.id not in submitted_internal_ids]
 
     text = (
-        "📊 *Admin statistika*\n\n"
-        f"Jami userlar: *{total_users}*\n"
-        f"To'laganlar: *{paid_users}*\n"
-        f"Aktivlar: *{active_users}*\n"
-        f"Bugun hisobot yuborganlar: *{len(submitted)}*\n"
-        f"Bugun hisobot yubormaganlar: *{len(missed)}*"
+        "📊 Admin statistika\n\n"
+        f"Jami userlar: {total_users}\n"
+        f"To'laganlar: {paid_users}\n"
+        f"Aktivlar: {active_users}\n"
+        f"Bugun hisobot yuborganlar: {len(submitted)}\n"
+        f"Bugun hisobot yubormaganlar: {len(missed)}"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text)
 
     submitted_lines = [f"- {_user_label(u)}" for u in submitted[:50]]
     missed_lines = [f"- {_user_label(u)}" for u in missed[:50]]
 
     await update.message.reply_text(
-        "✅ *Bugun yuborganlar*:\n" + ("\n".join(submitted_lines) if submitted_lines else "- yo'q"),
-        parse_mode="Markdown",
+        "✅ Bugun yuborganlar:\n" + ("\n".join(submitted_lines) if submitted_lines else "- yo'q"),
     )
     await update.message.reply_text(
-        "⚠️ *Bugun yubormaganlar*:\n" + ("\n".join(missed_lines) if missed_lines else "- yo'q"),
-        parse_mode="Markdown",
+        "⚠️ Bugun yubormaganlar:\n" + ("\n".join(missed_lines) if missed_lines else "- yo'q"),
     )
 
 
@@ -436,10 +454,10 @@ async def admin_missed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         missed = [u for u in paid_users if u.id not in submitted_ids]
 
     lines = [f"- {_user_label(u)}" for u in missed] or ["- yo'q"]
-    header = f"⚠️ *Hisobot yubormaganlar* ({target_date.isoformat()})\nSoni: *{len(missed)}*\n\n"
+    header = f"⚠️ Hisobot yubormaganlar ({target_date.isoformat()})\nSoni: {len(missed)}\n\n"
     text = header + "\n".join(lines)
     for i in range(0, len(text), 3900):
-        await update.message.reply_text(text[i : i + 3900], parse_mode="Markdown")
+        await update.message.reply_text(text[i : i + 3900])
 
 
 async def admin_kick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -758,9 +776,8 @@ async def nightly_backup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
 
 
-async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    hour = context.job.data.get("hour") if context.job else None
-    slot = _reminder_slot(int(hour)) if hour is not None else "midday"
+async def _send_module_reminders(context: ContextTypes.DEFAULT_TYPE, slot: str) -> int:
+    sent = 0
     with SessionLocal() as db:
         users = get_reportable_users(db)
         for user in users:
@@ -809,11 +826,11 @@ async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 await context.bot.send_message(
                     chat_id=user.tg_user_id,
                     text=msg,
-                    parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(
                         [[InlineKeyboardButton("📱 Mini Appni ochish", web_app=WebAppInfo(url=build_miniapp_url()))]]
                     ),
                 )
+                sent += 1
             except Exception:
                 continue
 
@@ -830,15 +847,40 @@ async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             if missed:
                 lines = [f"- {_user_label(u)}" for u in missed[:50]]
                 admin_text = (
-                    f"🚨 *Mentor ping*\\n\\n"
-                    f"Bugun hisobot yubormaganlar soni: *{len(missed)}*\\n\\n"
+                    f"🚨 Mentor ping\\n\\n"
+                    f"Bugun hisobot yubormaganlar soni: {len(missed)}\\n\\n"
                     + "\\n".join(lines)
                 )
                 for admin_tg_id in ADMIN_TG_IDS:
                     try:
-                        await context.bot.send_message(chat_id=admin_tg_id, text=admin_text, parse_mode="Markdown")
+                        await context.bot.send_message(chat_id=admin_tg_id, text=admin_text)
                     except Exception:
                         continue
+    return sent
+
+
+async def module_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    hour = context.job.data.get("hour") if context.job else None
+    slot = _reminder_slot(int(hour)) if hour is not None else "midday"
+    await _send_module_reminders(context, slot)
+
+
+async def remind_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = update.effective_user.id
+    if not _is_admin(admin_id):
+        await update.message.reply_text("❌ Siz admin emassiz.")
+        return
+
+    slot = "midday"
+    if context.args:
+        candidate = context.args[0].strip().lower()
+        if candidate in {"morning", "midday", "night"}:
+            slot = candidate
+
+    # Reuse reminder pipeline without waiting scheduler time.
+    sent = await _send_module_reminders(context, slot)
+
+    await update.message.reply_text(f"✅ remindnow bajarildi. Slot: {slot}. Yuborildi: {sent} ta user.")
 
 
 def run() -> None:
@@ -856,6 +898,7 @@ def run() -> None:
     app.add_handler(CommandHandler("kick", admin_kick))
     app.add_handler(CommandHandler("rollback", admin_rollback))
     app.add_handler(CommandHandler("leaderboard", leaderboard))
+    app.add_handler(CommandHandler("remindnow", remind_now))
     app.add_handler(CommandHandler("backupnow", backup_now))
     app.add_handler(CommandHandler("restoretest", restore_test))
     app.add_handler(CallbackQueryHandler(on_intro, pattern=r"^intro:"))

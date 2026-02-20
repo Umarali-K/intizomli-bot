@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import User
@@ -62,8 +62,14 @@ def get_reportable_users(db: Session) -> list[User]:
     return list(
         db.scalars(
             select(User).where(
-                User.is_paid.is_(True),
-                User.onboarding_completed.is_(True),
+                or_(User.is_paid.is_(True), User.payment_status == "paid"),
+                or_(
+                    User.onboarding_completed.is_(True),
+                    and_(
+                        User.registration_completed.is_(True),
+                        User.selected_modules_json.is_not(None),
+                    ),
+                ),
             )
         )
     )
